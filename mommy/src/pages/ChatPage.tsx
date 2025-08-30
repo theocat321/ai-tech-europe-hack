@@ -180,13 +180,13 @@ export default function ChatPage() {
       await unlockAudio()
       const ctx = audioCtxRef.current
       if (!ctx || ctx.state !== 'running') return
-      const duration = 0.18
+      const duration = 0.22
       const o = ctx.createOscillator()
       const g = ctx.createGain()
       o.type = 'sine'
       o.frequency.value = 880
       g.gain.setValueAtTime(0.001, ctx.currentTime)
-      g.gain.exponentialRampToValueAtTime(0.1, ctx.currentTime + 0.02)
+      g.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.02)
       g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration)
       o.connect(g).connect(ctx.destination)
       o.start()
@@ -195,6 +195,29 @@ export default function ChatPage() {
       // ignore audio errors
     }
   }, [])
+
+  const playTTS = React.useCallback(async (text: string) => {
+    try {
+      await unlockAudio()
+      const ctx = audioCtxRef.current
+      if (!ctx || ctx.state !== 'running') throw new Error('audiocontext not running')
+      const r = await fetch(`${API_URL}/api/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      })
+      if (!r.ok) throw new Error('tts fetch failed')
+      const arr = await r.arrayBuffer()
+      const buf = await ctx.decodeAudioData(arr)
+      const src = ctx.createBufferSource()
+      src.buffer = buf
+      src.connect(ctx.destination)
+      src.start(0)
+      return true
+    } catch (e) {
+      return false
+    }
+  }, [unlockAudio])
 
   // Unlock audio on first user interaction (browser autoplay policy)
   React.useEffect(() => {
@@ -315,6 +338,10 @@ export default function ChatPage() {
                             }
                             appendMessage(`${a.title} ${a.message}${q ? ` — Try: ${q}` : ''}`, false)
                             if (!speakHints) playChime()
+                            else if (q) {
+                              const ok = await playTTS(q)
+                              if (!ok) playChime()
+                            }
                           } catch {
                             appendMessage(`${a.title} ${a.message}`, false)
                             if (!speakHints) playChime()
@@ -402,19 +429,8 @@ export default function ChatPage() {
           appendMessage(`(hint) ${h.hint} — Try: ${h.followup_question}`, false)
           if (!speakHints) playChime()
           else {
-            // speak via OpenAI TTS
-            try {
-              const tts = await fetch(`${API_URL}/api/tts`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: `${h.hint}. ${h.followup_question}` })
-              })
-              if (tts.ok) {
-                const blob = await tts.blob()
-                const url = URL.createObjectURL(blob)
-                const audio = new Audio(url)
-                audio.play().finally(() => URL.revokeObjectURL(url))
-              }
-            } catch {}
+            const ok = await playTTS(h.followup_question)
+            if (!ok) playChime()
           }
           setStats((prev) => ({ ...prev, hints: prev.hints + 1 }))
           setHintTimes((prev) => [...prev, Date.now()])
@@ -485,7 +501,7 @@ export default function ChatPage() {
               <Button
                 variant={speakHints ? "default" : "outline"}
                 size="sm"
-                onClick={() => setSpeakHints((v) => !v)}
+                onClick={async () => { await unlockAudio(); setSpeakHints((v) => !v) }}
                 title="Toggle spoken hints"
               >
                 {speakHints ? 'Speaking On' : 'Speaking Off'}
@@ -690,29 +706,34 @@ export default function ChatPage() {
                 size="icon"
                 className="h-12 w-12 rounded-full shadow-lg"
                 variant="secondary"
-                onClick={() => {
+                onClick={async () => {
                   const hint = 'They mentioned a workaround; ask the last time it broke.'
                   const follow = 'Walk me through the most recent failure and how you handled it.'
                   appendMessage(`(hint) ${hint} — Try: ${follow}`, false)
                   if (!speakHints) {
                     playChime()
                   } else {
-                    fetch(`${API_URL}/api/tts`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ text: `${hint}. ${follow}` }),
-                    }).then(async (r) => {
-                      if (!r.ok) return
-                      const blob = await r.blob()
-                      const url = URL.createObjectURL(blob)
-                      const audio = new Audio(url)
-                      audio.play().finally(() => URL.revokeObjectURL(url))
-                    }).catch(() => {})
+                    const ok = await playTTS(`${hint}. ${follow}`)
+                    if (!ok) playChime()
                   }
                 }}
                 title="Force Hint Now"
               >
                 ▶
+              </Button>
+            )}
+            {demoMode && (
+              <Button
+                size="icon"
+                className="h-12 w-12 rounded-full shadow-lg"
+                variant="outline"
+                onClick={async () => {
+                  const ok = await playTTS('This is Tiger Mom. Voice check.')
+                  if (!ok) playChime()
+                }}
+                title="Test Voice"
+              >
+                🔊
               </Button>
             )}
           </div>

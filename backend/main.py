@@ -36,6 +36,7 @@ from prompts import (
     ENRICHMENT_SYSTEM_PROMPT,
     ENRICHMENT_USER_PROMPT_TEMPLATE,
     ASPECT_DETECTOR_SYSTEM_PROMPT,
+    HINT_ANALYZER_SYSTEM_PROMPT
 )
 
 load_dotenv()
@@ -702,7 +703,8 @@ async def tts_openai(request: Request, client: httpx.AsyncClient = Depends(get_h
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
     url = "https://api.openai.com/v1/audio/speech"
-    q = {"model": "gpt-4o-mini-tts", "voice": "verse", "input": text}
+    # Use widely available defaults; 'alloy' is a common voice
+    q = {"model": "gpt-4o-mini-tts", "voice": "alloy", "input": text}
     headers = {
         "Authorization": f"Bearer {OPENAI_API_KEY}",
         "Content-Type": "application/json",
@@ -713,6 +715,7 @@ async def tts_openai(request: Request, client: httpx.AsyncClient = Depends(get_h
         if r.status_code >= 400:
             logger.error("/api/tts openai error %d: %s", r.status_code, r.text[:512])
             return JSONResponse({"error": r.text}, status_code=r.status_code)
+        logger.info("/api/tts ok: bytes=%d", len(r.content or b""))
         return Response(content=r.content, media_type="audio/mpeg")
     except Exception as e:
         logger.exception("/api/tts failed: %s", str(e))
