@@ -381,7 +381,7 @@ export default function ChatPage() {
             if (!stopped) startOne()
           }
           recorder.start()
-          setTimeout(() => { try { recorder?.stop() } catch {} }, 5000)
+          setTimeout(() => { try { recorder?.stop() } catch { } }, 5000)
         }
         startOne()
       } catch (e) {
@@ -395,7 +395,7 @@ export default function ChatPage() {
 
     return () => {
       stopped = true
-      try { recorder?.stop() } catch {}
+      try { recorder?.stop() } catch { }
       recorder = null
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((t) => t.stop())
@@ -410,7 +410,7 @@ export default function ChatPage() {
       const sid = sessionId
       if (sid) {
         // Fire and forget
-        fetch(`${API_URL}/api/session/end?session_id=${sid}`, { method: 'POST' }).catch(() => {})
+        fetch(`${API_URL}/api/session/end?session_id=${sid}`, { method: 'POST' }).catch(() => { })
       }
     }
   }, [sessionId])
@@ -424,7 +424,7 @@ export default function ChatPage() {
         const r = await fetch(`${API_URL}/api/hints?session_id=${sessionId}`)
         if (!r.ok) return
         const data = await r.json()
-        const hints = (data?.hints || []) as Array<{hint: string, followup_question: string}>
+        const hints = (data?.hints || []) as Array<{ hint: string, followup_question: string }>
         for (const h of hints) {
           appendMessage(`(hint) ${h.hint} — Try: ${h.followup_question}`, false)
           if (!speakHints) playChime()
@@ -533,7 +533,7 @@ export default function ChatPage() {
                   try {
                     setStats((prev) => ({ ...prev, endedAt: Date.now() }))
                     if (sid) await fetch(`${API_URL}/api/session/end?session_id=${sid}`, { method: 'POST' })
-                  } catch {}
+                  } catch { }
                   navigate('/summary', { state: { stats, timeline, hintTimes } })
                 }}
                 title="End call and view summary"
@@ -567,12 +567,12 @@ export default function ChatPage() {
                   const txt = message.text || ''
                   const aspectKey = txt.startsWith('[compliment]') ? 'compliment'
                     : txt.startsWith('[hypothetical]') ? 'hypothetical'
-                    : txt.startsWith('[leading]') ? 'leading'
-                    : txt.startsWith('[pitching]') ? 'pitching'
-                    : txt.startsWith('[fluff]') ? 'fluff'
-                    : txt.startsWith('[yes/no]') ? 'yesno'
-                    : txt.startsWith('[vague]') ? 'vague'
-                    : null
+                      : txt.startsWith('[leading]') ? 'leading'
+                        : txt.startsWith('[pitching]') ? 'pitching'
+                          : txt.startsWith('[fluff]') ? 'fluff'
+                            : txt.startsWith('[yes/no]') ? 'yesno'
+                              : txt.startsWith('[vague]') ? 'vague'
+                                : null
                   const aspectClasses: Record<string, string> = {
                     compliment: 'border-amber-300 bg-amber-50 dark:bg-amber-950/30',
                     hypothetical: 'border-sky-300 bg-sky-50 dark:bg-sky-950/30',
@@ -689,7 +689,7 @@ export default function ChatPage() {
             </Card>
             {/* Aspect warnings moved into main feed */}
           </div>
-            
+
           {/* Floating Action Buttons (Demo) */}
           <div className="fixed right-4 bottom-4 flex flex-col gap-2 pointer-events-auto">
             <Button
