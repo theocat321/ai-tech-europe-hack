@@ -1,6 +1,6 @@
 import os
-import json
 from typing import Optional
+
 from fastapi import FastAPI, Body, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse, PlainTextResponse
@@ -13,6 +13,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 ELEVEN_MODEL = os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2_5")
 ELEVEN_VOICE = os.getenv("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")
+PERSONAL_CONTEXT_FILE = "personal_context.txt"
 
 if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY missing")
@@ -51,17 +52,53 @@ When you detect the interviewer SKIPS or GLIDES OVER a strong signal (e.g., they
 Cadence: at most one hint every 45 seconds.
 
 If the user explicitly asks you for help, answer with 1–2 sentences, or give 1–2 high-quality questions.
-"""
+""".strip()
 
-def make_instructions(user_context: str) -> str:
-    context = f"\nContext for this call (developer-provided):\n{user_context.strip()}\n"
-    return BASE_BEHAVIOR + context
+
+def read_personal_context() -> str:
+    try:
+        with open(PERSONAL_CONTEXT_FILE, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return ""
+
+
+def make_instructions(client_context: str, personal_context: str) -> str:
+    client_context = (client_context or "").strip()
+    personal_context = (personal_context or "").strip()
+
+    personal_context_section = (
+        f"\n\nMy personal context:\n{personal_context}"
+        if personal_context
+        else ""
+    )
+    client_context_section = (
+        f"\n\nContext for this call (client-provided):\n{client_context}"
+        if client_context
+        else ""
+    )
+    return BASE_BEHAVIOR + personal_context_section + client_context_section
+
 
 # --- Routes ------------------------------------------------------------------------
 
 @app.get("/")
 def root():
     return PlainTextResponse("Mom Test Assistant Backend is running.")
+
+
+@app.get("/api/personal_context")
+def get_personal_context():
+    return PlainTextResponse(read_personal_context())
+
+
+@app.post("/api/personal_context")
+async def update_personal_context(payload: dict = Body(...)):
+    content = payload.get("content", "")
+    with open(PERSONAL_CONTEXT_FILE, "w", encoding="utf-8") as f:
+        f.write(content)
+    return {"status": "ok"}
+
 
 @app.post("/api/realtime")
 async def create_realtime_client_secret(payload: dict = Body(...)):
@@ -77,7 +114,7 @@ async def create_realtime_client_secret(payload: dict = Body(...)):
         "model": "gpt-realtime",
         # Set a voice so the model can speak. Marin/Cedar are new high-quality voices.
         **({"voice": voice} if voice else {}),
-        "instructions": make_instructions(user_context),
+        "instructions": make_instructions(user_context, read_personal_context()),
         # Tool definition: the model will call this when it wants to whisper a hint.
         "tools": [
             {
@@ -123,7 +160,7 @@ async def create_realtime_client_secret(payload: dict = Body(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/whisper", response_class=StreamingResponse)
+@app.post("/api/whisper")
 async def elevenlabs_whisper(payload: dict = Body(...)):
     """
     Generate a short whispered TTS hint. Keep it LOW LATENCY.
@@ -143,7 +180,7 @@ async def elevenlabs_whisper(payload: dict = Body(...)):
         "model_id": ELEVEN_MODEL,
         "text": whisper_text,
         "output_format": "mp3_22050_32",
-        # Keep responses snappy; you can tweak via VoiceSettings, but default is okay for short hints.
+        # Keep responses snappy; defaults are fine for short hints.
     }
 
     async def gen():
@@ -160,6 +197,7 @@ async def elevenlabs_whisper(payload: dict = Body(...)):
                     json=q,
                 ) as resp:
                     if resp.status_code >= 400:
+                        # Surface ElevenLabs error body to caller
                         chunk = await resp.aread()
                         yield chunk
                         return
