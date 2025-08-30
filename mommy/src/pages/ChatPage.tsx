@@ -56,10 +56,9 @@ export default function ChatPage() {
           <div className="w-full px-4 py-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
                 onClick={() => navigate("/")}
-                className="flex items-center gap-2"
               >
                 <ArrowLeft className="h-4 w-4" />
                 Back
