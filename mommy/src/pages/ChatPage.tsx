@@ -29,6 +29,7 @@ export default function ChatPage() {
   const [error, setError] = React.useState<string | null>(null)
   const [isListening, setIsListening] = React.useState(true)
   const [isLoading, setIsLoading] = React.useState(false)
+  const [demoMode, setDemoMode] = React.useState(false)
   const [messages, setMessages] = React.useState<Message[]>([
     {
       id: "1",
@@ -234,6 +235,14 @@ export default function ChatPage() {
                   >
                     Hints Only
                   </span>
+                  {demoMode && (
+                    <span
+                      title="Demo mode is ON"
+                      className="text-[11px] px-2 py-0.5 rounded-full border border-blue-300 bg-blue-50 text-blue-800 dark:border-blue-500/40 dark:bg-blue-950/40 dark:text-blue-300"
+                    >
+                      Demo
+                    </span>
+                  )}
                 </h1>
                 <p className="text-sm text-muted-foreground">
                   {isListening ? "Listening…" : "Paused"}
@@ -241,6 +250,27 @@ export default function ChatPage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <Button
+                variant={demoMode ? "default" : "outline"}
+                size="sm"
+                onClick={() => setDemoMode((v) => !v)}
+              >
+                {demoMode ? 'Demo On' : 'Demo Mode'}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={!demoMode}
+                onClick={() => {
+                  const hint = 'They mentioned a workaround; ask the last time it broke.'
+                  const follow = 'Walk me through the most recent failure and how you handled it.'
+                  appendMessage(`(hint) ${hint} — Try: ${follow}`, false)
+                  playWhisper(`${hint}. ${follow}`)
+                }}
+                title={demoMode ? 'Trigger a sample hint' : 'Enable Demo Mode to use'}
+              >
+                Force Hint Now
+              </Button>
               <Button
                 variant={isListening ? "secondary" : "default"}
                 size="sm"
