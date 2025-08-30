@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route, NavLink, Link } from 'react-rou
 import HomePage from '@/pages/HomePage'
 import ChatPage from '@/pages/ChatPage'
 import AboutMePage from '@/pages/AboutMePage'
+import SummaryPage from '@/pages/SummaryPage'
 
 function App() {
   return (
@@ -45,6 +46,7 @@ function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/about-me" element={<AboutMePage />} />
+          <Route path="/summary" element={<SummaryPage />} />
         </Routes>
       </div>
     </Router>

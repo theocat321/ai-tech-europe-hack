@@ -49,6 +49,22 @@ export default function ChatPage() {
   const [lastTranscript, setLastTranscript] = React.useState<string>("")
   const [aspects, setAspects] = React.useState<Array<{ key: string; title: string; message: string; followup: string }>>([])
   const seenAspectKeysRef = React.useRef<Set<string>>(new Set())
+  const [stats, setStats] = React.useState<{
+    segments: number
+    hints: number
+    flowSegments: number
+    aspects: Record<string, number>
+    startedAt: number
+    endedAt?: number
+  }>({
+    segments: 0,
+    hints: 0,
+    flowSegments: 0,
+    aspects: { compliment: 0, hypothetical: 0, leading: 0, pitching: 0, fluff: 0, yesno: 0, vague: 0 },
+    startedAt: Date.now(),
+  })
+  const [timeline, setTimeline] = React.useState<Array<{ t: number; warned: boolean }>>([])
+  const [hintTimes, setHintTimes] = React.useState<number[]>([])
 
   // Detect Mom Test anti-patterns from the latest transcript chunk
   const detectAspects = React.useCallback((text: string) => {
@@ -237,9 +253,26 @@ export default function ChatPage() {
                         }
                       }
                     }
+                    // Update stats
+                    const now = Date.now()
+                    setTimeline((prev) => [...prev, { t: now, warned: found.length > 0 }])
+                    setStats((prev) => {
+                      const next = { ...prev, segments: prev.segments + 1 }
+                      if (found.length === 0) {
+                        next.flowSegments = prev.flowSegments + 1
+                      } else {
+                        const aspectsCounts = { ...prev.aspects }
+                        for (const a of found) {
+                          if (a.key in aspectsCounts) aspectsCounts[a.key] += 1
+                        }
+                        next.aspects = aspectsCounts
+                      }
+                      return next
+                    })
                   }
                 } else {
                   setSegmentCount((c) => c + 1)
+                  setStats((prev) => ({ ...prev, segments: prev.segments + 1 }))
                 }
               } catch (e) { console.warn('stt_chunk failed', e) }
             }
@@ -309,6 +342,8 @@ export default function ChatPage() {
               }
             } catch {}
           }
+          setStats((prev) => ({ ...prev, hints: prev.hints + 1 }))
+          setHintTimes((prev) => [...prev, Date.now()])
         }
       } finally {
         timer = setTimeout(tick, 4000)
@@ -372,6 +407,21 @@ export default function ChatPage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  const sid = sessionId
+                  try {
+                    setStats((prev) => ({ ...prev, endedAt: Date.now() }))
+                    if (sid) await fetch(`${API_URL}/api/session/end?session_id=${sid}`, { method: 'POST' })
+                  } catch {}
+                  navigate('/summary', { state: { stats, timeline, hintTimes } })
+                }}
+                title="End call and view summary"
+              >
+                End Call
+              </Button>
               {/* Single default whisper voice; dropdown removed */}
               <Button
                 variant={demoMode ? "default" : "outline"}
