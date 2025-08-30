@@ -1,148 +1,196 @@
-import { useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { ArrowLeft, Send } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import * as React from "react"
+import { useNavigate } from "react-router-dom"
+import { ArrowLeft, Mic, MicOff } from "lucide-react"
+
+import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 
 interface Message {
   id: string
   text: string
   isUser: boolean
   timestamp: Date
+  initials?: string
 }
 
 export default function ChatPage() {
   const navigate = useNavigate()
-  const [messages, setMessages] = useState<Message[]>([
+  const [isListening, setIsListening] = React.useState(true)
+  const [isLoading, setIsLoading] = React.useState(false)
+  const [messages, setMessages] = React.useState<Message[]>([
     {
-      id: '1',
-      text: 'Hello! I\'m your AI assistant. How can I help you today?',
+      id: "1",
+      text: "I’m listening. Start speaking whenever you’re ready.",
       isUser: false,
-      timestamp: new Date()
-    }
+      timestamp: new Date(),
+      initials: "AI",
+    },
   ])
-  const [inputValue, setInputValue] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
 
-  const handleSendMessage = async () => {
-    if (!inputValue.trim()) return
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      text: inputValue,
-      isUser: true,
-      timestamp: new Date()
-    }
-
-    setMessages(prev => [...prev, userMessage])
-    setInputValue('')
-    setIsLoading(true)
-
-    // Simulate AI response
-    setTimeout(() => {
-      const aiMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: 'This is a simulated AI response. In a real application, this would be the AI\'s reply to your message.',
+  // Example: simulated incoming AI message while "listening"
+  React.useEffect(() => {
+    if (!isListening) return
+    // demo only: fake an AI follow-up after 2s
+    const t = setTimeout(() => {
+      setIsLoading(true)
+      const msg: Message = {
+        id: crypto.randomUUID(),
+        text:
+          "This is a simulated response captured while listening. Connect your STT pipeline to push transcriptions here.",
         isUser: false,
-        timestamp: new Date()
+        timestamp: new Date(),
+        initials: "AI",
       }
-      setMessages(prev => [...prev, aiMessage])
+      setMessages((prev) => [...prev, msg])
       setIsLoading(false)
-    }, 1000)
-  }
-
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSendMessage()
-    }
-  }
+    }, 2000)
+    return () => clearTimeout(t)
+  }, [isListening])
 
   return (
-    <div className="min-h-screen w-full bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
+    <div className="min-h-screen w-full bg-background text-foreground">
       <div className="w-full h-screen flex flex-col">
         {/* Header */}
-        <div className="w-full bg-white/80 backdrop-blur-sm border-b border-gray-200 dark:bg-gray-900/80 dark:border-gray-700">
+        <div className="w-full bg-card/80 backdrop-blur-sm border-b">
           <div className="w-full px-4 py-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
-                onClick={() => navigate('/')}
-                className="flex items-center gap-2"
+                onClick={() => navigate("/")}
               >
                 <ArrowLeft className="h-4 w-4" />
                 Back
               </Button>
               <div>
                 <h1 className="text-lg font-semibold">AI Chat Session</h1>
-                <p className="text-sm text-muted-foreground">Real-time conversation</p>
+                <p className="text-sm text-muted-foreground">
+                  {isListening ? "Listening…" : "Paused"}
+                </p>
               </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant={isListening ? "secondary" : "default"}
+                size="sm"
+                onClick={() => setIsListening((v) => !v)}
+              >
+                {isListening ? (
+                  <>
+                    <MicOff className="h-4 w-4 mr-2" />
+                    Pause
+                  </>
+                ) : (
+                  <>
+                    <Mic className="h-4 w-4 mr-2" />
+                    Resume
+                  </>
+                )}
+              </Button>
             </div>
           </div>
         </div>
 
-        {/* Messages Area */}
-        <div className="flex-1 w-full overflow-y-auto px-4 py-4">
-          <div className="w-full max-w-6xl mx-auto space-y-4">
+        {/* Messages */}
+        <div className="relative flex-1 w-full overflow-y-auto px-4 py-4">
+          <div className="w-full max-w-3xl mx-auto space-y-3 pb-28">
             {messages.map((message) => (
               <div
                 key={message.id}
-                className={`flex ${message.isUser ? 'justify-end' : 'justify-start'}`}
+                className={`flex items-end gap-2 ${message.isUser ? "justify-end" : "justify-start"
+                  }`}
               >
-                <Card className={`max-w-[80%] ${message.isUser ? 'bg-primary text-primary-foreground' : 'bg-card'}`}>
+                {!message.isUser && (
+                  <Avatar className="h-8 w-8">
+                    <AvatarFallback>{message.initials ?? "AI"}</AvatarFallback>
+                  </Avatar>
+                )}
+
+                <Card
+                  className={`max-w-[80%] ${message.isUser
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-card"
+                    }`}
+                >
                   <CardContent className="p-3">
-                    <p className="text-sm">{message.text}</p>
-                    <p className={`text-xs mt-1 ${message.isUser ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
+                    <p className="text-sm leading-relaxed">{message.text}</p>
+                    <p
+                      className={`text-[11px] mt-1 ${message.isUser
+                        ? "text-primary-foreground/70"
+                        : "text-muted-foreground"
+                        }`}
+                    >
                       {message.timestamp.toLocaleTimeString()}
                     </p>
                   </CardContent>
                 </Card>
+
+                {message.isUser && (
+                  <Avatar className="h-8 w-8">
+                    <AvatarFallback>YOU</AvatarFallback>
+                  </Avatar>
+                )}
               </div>
             ))}
+
             {isLoading && (
               <div className="flex justify-start">
-                <Card className="max-w-[80%] bg-card">
+                <Card className="max-w-[80%]">
                   <CardContent className="p-3">
                     <div className="flex items-center gap-2">
                       <div className="flex space-x-1">
-                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                        <span className="w-2 h-2 rounded-full bg-muted-foreground/70 animate-bounce" />
+                        <span
+                          className="w-2 h-2 rounded-full bg-muted-foreground/70 animate-bounce"
+                          style={{ animationDelay: "120ms" }}
+                        />
+                        <span
+                          className="w-2 h-2 rounded-full bg-muted-foreground/70 animate-bounce"
+                          style={{ animationDelay: "240ms" }}
+                        />
                       </div>
-                      <span className="text-sm text-muted-foreground">AI is typing...</span>
+                      <span className="text-sm text-muted-foreground">
+                        AI is thinking…
+                      </span>
                     </div>
                   </CardContent>
                 </Card>
               </div>
             )}
           </div>
-        </div>
 
-        {/* Input Area */}
-        <div className="w-full bg-white/80 backdrop-blur-sm border-t border-gray-200 dark:bg-gray-900/80 dark:border-gray-700">
-          <div className="w-full max-w-6xl mx-auto px-4 py-4">
-            <div className="flex gap-2">
-              <Input
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyPress={handleKeyPress}
-                placeholder="Type your message..."
-                className="flex-1"
-                disabled={isLoading}
-              />
-              <Button
-                onClick={handleSendMessage}
-                disabled={!inputValue.trim() || isLoading}
-                size="icon"
-              >
-                <Send className="h-4 w-4" />
-              </Button>
+          {/* Floating Listening Control */}
+          <div className="pointer-events-none fixed left-1/2 bottom-6 -translate-x-1/2">
+            <div className="relative h-16 w-16">
+              {/* Pulses */}
+              {isListening && (
+                <>
+                  <span className="absolute inset-0 rounded-full bg-primary/25 animate-ping" />
+                  <span className="absolute inset-0 rounded-full bg-primary/15 animate-ping [animation-delay:150ms]" />
+                </>
+              )}
+              {/* Mic button */}
+              <div className="pointer-events-auto">
+                <Button
+                  size="icon"
+                  className="h-16 w-16 rounded-full shadow-lg"
+                  onClick={() => setIsListening((v) => !v)}
+                >
+                  {isListening ? (
+                    <Mic className="h-6 w-6" />
+                  ) : (
+                    <MicOff className="h-6 w-6" />
+                  )}
+                  <span className="sr-only">
+                    {isListening ? "Pause listening" : "Resume listening"}
+                  </span>
+                </Button>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </div>
   )
-} 
+}
