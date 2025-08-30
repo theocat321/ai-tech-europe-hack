@@ -81,6 +81,15 @@ class AspectSuggestResponse(BaseModel):
     question: str
 
 
+class AspectDetectRequest(BaseModel):
+    session_id: str
+    text: str
+
+
+class AspectDetectResponse(BaseModel):
+    aspects: List[str]
+
+
 # --- LLM Aspect Detection ---------------------------------------------------------
 
 class AspectDetectRequest(BaseModel):

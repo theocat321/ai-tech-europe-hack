@@ -39,8 +39,9 @@ export default function ChatPage() {
     },
   ])
 
-  // WebRTC refs
+  // Refs
   const localStreamRef = React.useRef<MediaStream | null>(null)
+  const recorderRef = React.useRef<MediaRecorder | null>(null)
   // Text-only hints: no whisper audio playback
   const audioCtxRef = React.useRef<AudioContext | null>(null)
   const chimeEnabledRef = React.useRef<boolean>(true)
@@ -277,6 +278,7 @@ export default function ChatPage() {
           } catch (e) {
             recorder = new MediaRecorder(ms)
           }
+          recorderRef.current = recorder
           const chunks: Blob[] = []
           recorder.ondataavailable = (ev) => {
             if (ev.data && ev.data.size) chunks.push(ev.data)
@@ -305,12 +307,19 @@ export default function ChatPage() {
                       if (det.ok) {
                         const j = await det.json()
                         const keys: string[] = Array.isArray(j?.aspects) ? j.aspects : []
-                        found = keys.map((key) => ({
-                          key,
-                          title: (aspectMeta as any)[key]?.title || `[${key}]`,
-                          message: (aspectMeta as any)[key]?.message || 'Check phrasing.',
-                          followup: '',
-                        }))
+                        const meta = (k: string) => {
+                          switch (k) {
+                            case 'compliment': return { title: '[compliment]', message: 'Compliments hide facts.' }
+                            case 'hypothetical': return { title: '[hypothetical]', message: 'Drop hypotheticals.' }
+                            case 'leading': return { title: '[leading]', message: 'Leading questions bias answers. Ask neutrally.' }
+                            case 'pitching': return { title: '[pitching]', message: 'Avoid pitching.' }
+                            case 'fluff': return { title: '[fluff]', message: 'Opinions ≠ evidence.' }
+                            case 'yesno': return { title: '[yes/no]', message: 'Avoid yes/no.' }
+                            case 'vague': return { title: '[vague]', message: 'Get specific.' }
+                            default: return { title: `[${k}]`, message: 'Check phrasing.' }
+                          }
+                        }
+                        found = keys.map((k) => ({ key: k, ...meta(k), followup: '' }))
                       } else {
                         found = detectAspects(text)
                       }
@@ -397,6 +406,7 @@ export default function ChatPage() {
       stopped = true
       try { recorder?.stop() } catch { }
       recorder = null
+      recorderRef.current = null
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((t) => t.stop())
         localStreamRef.current = null
@@ -419,7 +429,9 @@ export default function ChatPage() {
   React.useEffect(() => {
     if (!sessionId) return
     let timer: any
+    let active = true
     const tick = async () => {
+      if (!active) return
       try {
         const r = await fetch(`${API_URL}/api/hints?session_id=${sessionId}`)
         if (!r.ok) return
@@ -436,11 +448,11 @@ export default function ChatPage() {
           setHintTimes((prev) => [...prev, Date.now()])
         }
       } finally {
-        timer = setTimeout(tick, 4000)
+        if (active) timer = setTimeout(tick, 4000)
       }
     }
     tick()
-    return () => clearTimeout(timer)
+    return () => { active = false; if (timer) clearTimeout(timer) }
   }, [sessionId, appendMessage, playChime, speakHints])
 
   // Toggle mic enable/disable when isListening changes
@@ -532,7 +544,18 @@ export default function ChatPage() {
                   const sid = sessionId
                   try {
                     setStats((prev) => ({ ...prev, endedAt: Date.now() }))
+                    fetch(`${API_URL}/api/realtime/end`, { method: 'POST' }).catch(() => { })
                     if (sid) await fetch(`${API_URL}/api/session/end?session_id=${sid}`, { method: 'POST' })
+                    // stop polling immediately
+                    setSessionId(null)
+                    // stop recorder and mic immediately
+                    try { recorderRef.current?.stop() } catch {}
+                    recorderRef.current = null
+                    const s = localStreamRef.current
+                    if (s) {
+                      s.getTracks().forEach((t) => { try { t.stop() } catch {} })
+                      localStreamRef.current = null
+                    }
                   } catch { }
                   navigate('/summary', { state: { stats, timeline, hintTimes } })
                 }}
