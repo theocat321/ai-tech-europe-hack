@@ -44,6 +44,7 @@ export default function ChatPage() {
   // Text-only hints: no whisper audio playback
   const audioCtxRef = React.useRef<AudioContext | null>(null)
   const chimeEnabledRef = React.useRef<boolean>(true)
+  const audioUnlockedRef = React.useRef<boolean>(false)
   const [sessionId, setSessionId] = React.useState<string | null>(null)
   const [segmentCount, setSegmentCount] = React.useState<number>(0)
   const [lastTranscript, setLastTranscript] = React.useState<string>("")
@@ -80,8 +81,8 @@ export default function ChatPage() {
       push(
         'compliment',
         '[compliment]',
-        'Compliments paper over facts. Pivot to past behavior.',
-        'When was the last time that happened and what did you do next?'
+        'Compliments hide facts.',
+        ''
       )
     }
 
@@ -90,8 +91,8 @@ export default function ChatPage() {
       push(
         'hypothetical',
         '[hypothetical]',
-        'Hypotheticals are unreliable. Anchor to real, recent events.',
-        'Tell me about the last time this came up. What did you actually do?'
+        'Drop hypotheticals.',
+        ''
       )
     }
 
@@ -101,7 +102,7 @@ export default function ChatPage() {
         'leading',
         '[leading]',
         'Leading questions bias answers. Ask neutrally.',
-        'How do you handle this today? What did you try most recently?'
+        ''
       )
     }
 
@@ -110,8 +111,8 @@ export default function ChatPage() {
       push(
         'pitching',
         '[pitching]',
-        'Pitching too early kills learning. Stay in their world.',
-        'What have you tried so far and what broke first?'
+        'Avoid pitching.',
+        ''
       )
     }
 
@@ -120,8 +121,8 @@ export default function ChatPage() {
       push(
         'fluff',
         '[fluff]',
-        'Opinions are soft. Ask for specifics and numbers.',
-        'Over the past month, how often did this happen and how long did it take?'
+        'Opinions ≠ evidence.',
+        ''
       )
     }
 
@@ -130,8 +131,8 @@ export default function ChatPage() {
       push(
         'yesno',
         '[yes/no]',
-        'Yes/No invites short answers. Open it up.',
-        'Walk me through the last time; what happened first?'
+        'Avoid yes/no.',
+        ''
       )
     }
 
@@ -140,16 +141,15 @@ export default function ChatPage() {
       push(
         'vague',
         '[vague]',
-        'Vague universals hide edge cases. Get a concrete example.',
-        'Can you recall a specific recent instance? What did you do?'
+        'Get specific.',
+        ''
       )
     }
 
     return found
   }, [])
 
-  const playChime = React.useCallback(async () => {
-    if (!chimeEnabledRef.current) return
+  const unlockAudio = React.useCallback(async () => {
     try {
       let ctx = audioCtxRef.current
       if (!ctx) {
@@ -157,6 +157,18 @@ export default function ChatPage() {
         audioCtxRef.current = ctx
       }
       if (ctx.state === 'suspended') await ctx.resume()
+      audioUnlockedRef.current = ctx.state === 'running'
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  const playChime = React.useCallback(async () => {
+    if (!chimeEnabledRef.current) return
+    try {
+      await unlockAudio()
+      const ctx = audioCtxRef.current
+      if (!ctx || ctx.state !== 'running') return
       const duration = 0.18
       const o = ctx.createOscillator()
       const g = ctx.createGain()
@@ -172,6 +184,15 @@ export default function ChatPage() {
       // ignore audio errors
     }
   }, [])
+
+  // Unlock audio on first user interaction (browser autoplay policy)
+  React.useEffect(() => {
+    const handler = () => {
+      unlockAudio()
+    }
+    document.addEventListener('pointerdown', handler, { once: true })
+    return () => document.removeEventListener('pointerdown', handler)
+  }, [unlockAudio])
 
   const appendMessage = React.useCallback((text: string, isUser = false) => {
     setMessages((prev) => [
@@ -245,7 +266,27 @@ export default function ChatPage() {
                     const seen = seenAspectKeysRef.current
                     for (const a of found) {
                       if (!seen.has(a.key)) {
-                        appendMessage(`${a.title} ${a.message} — Try: ${a.followup}`, false)
+                        // Fetch LLM-generated follow-up based on context
+                        (async () => {
+                          try {
+                            const sid = sData.session_id
+                            const r = await fetch(`${API_URL}/api/aspect_suggest`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ session_id: sid, aspect: a.key }),
+                            })
+                            let q = ''
+                            if (r.ok) {
+                              const j = await r.json()
+                              q = (j?.question || '').trim()
+                            }
+                            appendMessage(`${a.title} ${a.message}${q ? ` — Try: ${q}` : ''}`, false)
+                            if (!speakHints) playChime()
+                          } catch {
+                            appendMessage(`${a.title} ${a.message}`, false)
+                            if (!speakHints) playChime()
+                          }
+                        })()
                         seen.add(a.key)
                         if (seen.size > 100) {
                           // prevent unbounded growth
@@ -407,58 +448,7 @@ export default function ChatPage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={async () => {
-                  const sid = sessionId
-                  try {
-                    setStats((prev) => ({ ...prev, endedAt: Date.now() }))
-                    if (sid) await fetch(`${API_URL}/api/session/end?session_id=${sid}`, { method: 'POST' })
-                  } catch {}
-                  navigate('/summary', { state: { stats, timeline, hintTimes } })
-                }}
-                title="End call and view summary"
-              >
-                End Call
-              </Button>
-              {/* Single default whisper voice; dropdown removed */}
-              <Button
-                variant={demoMode ? "default" : "outline"}
-                size="sm"
-                onClick={() => setDemoMode((v) => !v)}
-              >
-                {demoMode ? 'Demo On' : 'Demo Mode'}
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={!demoMode}
-                onClick={() => {
-                  const hint = 'They mentioned a workaround; ask the last time it broke.'
-                  const follow = 'Walk me through the most recent failure and how you handled it.'
-                  appendMessage(`(hint) ${hint} — Try: ${follow}`, false)
-                  if (!speakHints) {
-                    playChime()
-                  } else {
-                    // Speak via backend TTS
-                    fetch(`${API_URL}/api/tts`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ text: `${hint}. ${follow}` }),
-                    }).then(async (r) => {
-                      if (!r.ok) return
-                      const blob = await r.blob()
-                      const url = URL.createObjectURL(blob)
-                      const audio = new Audio(url)
-                      audio.play().finally(() => URL.revokeObjectURL(url))
-                    }).catch(() => {})
-                  }
-                }}
-                title={demoMode ? 'Trigger a sample hint' : 'Enable Demo Mode to use'}
-              >
-                Force Hint Now
-              </Button>
+              {/* Speaking toggle first */}
               <Button
                 variant={speakHints ? "default" : "outline"}
                 size="sm"
@@ -467,6 +457,7 @@ export default function ChatPage() {
               >
                 {speakHints ? 'Speaking On' : 'Speaking Off'}
               </Button>
+              {/* Pause/Resume second */}
               <Button
                 variant={isListening ? "secondary" : "default"}
                 size="sm"
@@ -483,6 +474,22 @@ export default function ChatPage() {
                     Resume
                   </>
                 )}
+              </Button>
+              {/* End Call last */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  const sid = sessionId
+                  try {
+                    setStats((prev) => ({ ...prev, endedAt: Date.now() }))
+                    if (sid) await fetch(`${API_URL}/api/session/end?session_id=${sid}`, { method: 'POST' })
+                  } catch {}
+                  navigate('/summary', { state: { stats, timeline, hintTimes } })
+                }}
+                title="End call and view summary"
+              >
+                End Call
               </Button>
             </div>
           </div>
@@ -507,24 +514,38 @@ export default function ChatPage() {
                   </Avatar>
                 )}
 
-                <Card
-                  className={`max-w-[80%] ${message.isUser
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-card"
-                    }`}
-                >
-                  <CardContent className="p-3">
-                    <p className="text-sm leading-relaxed">{message.text}</p>
-                    <p
-                      className={`text-[11px] mt-1 ${message.isUser
-                        ? "text-primary-foreground/70"
-                        : "text-muted-foreground"
-                        }`}
-                    >
-                      {message.timestamp.toLocaleTimeString()}
-                    </p>
-                  </CardContent>
-                </Card>
+                {(() => {
+                  const txt = message.text || ''
+                  const aspectKey = txt.startsWith('[compliment]') ? 'compliment'
+                    : txt.startsWith('[hypothetical]') ? 'hypothetical'
+                    : txt.startsWith('[leading]') ? 'leading'
+                    : txt.startsWith('[pitching]') ? 'pitching'
+                    : txt.startsWith('[fluff]') ? 'fluff'
+                    : txt.startsWith('[yes/no]') ? 'yesno'
+                    : txt.startsWith('[vague]') ? 'vague'
+                    : null
+                  const aspectClasses: Record<string, string> = {
+                    compliment: 'border-amber-300 bg-amber-50 dark:bg-amber-950/30',
+                    hypothetical: 'border-sky-300 bg-sky-50 dark:bg-sky-950/30',
+                    leading: 'border-rose-400 bg-rose-50 dark:bg-rose-950/30',
+                    pitching: 'border-violet-300 bg-violet-50 dark:bg-violet-950/30',
+                    fluff: 'border-gray-300 bg-gray-50 dark:bg-gray-900/50',
+                    yesno: 'border-cyan-300 bg-cyan-50 dark:bg-cyan-950/30',
+                    vague: 'border-yellow-300 bg-yellow-50 dark:bg-yellow-950/30',
+                  }
+                  const base = message.isUser ? 'bg-primary text-primary-foreground' : 'bg-card'
+                  const style = aspectKey ? `border ${aspectClasses[aspectKey]}` : base
+                  return (
+                    <Card className={`max-w-[80%] ${style}`}>
+                      <CardContent className="p-3">
+                        <p className="text-sm leading-relaxed">{message.text}</p>
+                        <p className={`text-[11px] mt-1 ${message.isUser ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
+                          {message.timestamp.toLocaleTimeString()}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  )
+                })()}
 
                 {message.isUser && (
                   <Avatar className="h-8 w-8">
@@ -591,8 +612,8 @@ export default function ChatPage() {
           </div>
 
           {/* Only chime or OpenAI TTS playback handled programmatically */}
-          {/* Floating Recorder Indicator (bottom-right) */}
-          <div className="fixed bottom-4 right-4 pointer-events-auto">
+          {/* Floating Recorder Indicator (bottom-right, raised to make space for FAB) */}
+          <div className="fixed bottom-24 right-4 pointer-events-auto">
             <Card className="w-72 shadow-lg bg-card/90 backdrop-blur-sm border">
               <CardContent className="p-3">
                 <div className="flex items-center gap-2 mb-1">
@@ -618,6 +639,49 @@ export default function ChatPage() {
               </CardContent>
             </Card>
             {/* Aspect warnings moved into main feed */}
+          </div>
+            
+          {/* Floating Action Buttons (Demo) */}
+          <div className="fixed right-4 bottom-4 flex flex-col gap-2 pointer-events-auto">
+            <Button
+              size="icon"
+              className={`h-12 w-12 rounded-full shadow-lg ${demoMode ? 'bg-blue-600 text-white hover:bg-blue-600' : ''}`}
+              variant={demoMode ? 'default' : 'outline'}
+              onClick={() => setDemoMode((v) => !v)}
+              title={demoMode ? 'Demo Mode On' : 'Enable Demo Mode'}
+            >
+              DM
+            </Button>
+            {demoMode && (
+              <Button
+                size="icon"
+                className="h-12 w-12 rounded-full shadow-lg"
+                variant="secondary"
+                onClick={() => {
+                  const hint = 'They mentioned a workaround; ask the last time it broke.'
+                  const follow = 'Walk me through the most recent failure and how you handled it.'
+                  appendMessage(`(hint) ${hint} — Try: ${follow}`, false)
+                  if (!speakHints) {
+                    playChime()
+                  } else {
+                    fetch(`${API_URL}/api/tts`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ text: `${hint}. ${follow}` }),
+                    }).then(async (r) => {
+                      if (!r.ok) return
+                      const blob = await r.blob()
+                      const url = URL.createObjectURL(blob)
+                      const audio = new Audio(url)
+                      audio.play().finally(() => URL.revokeObjectURL(url))
+                    }).catch(() => {})
+                  }
+                }}
+                title="Force Hint Now"
+              >
+                ▶
+              </Button>
+            )}
           </div>
         </div>
       </div>

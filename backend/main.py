@@ -24,6 +24,8 @@ from models.models import (
     StartSessionResponse,
     HintsResponse,
     EndSessionResponse,
+    AspectSuggestRequest,
+    AspectSuggestResponse,
     EnrichLinkedInRequest,
     EnrichLinkedInResponse,
 )
@@ -638,6 +640,50 @@ async def end_session(session_id: str):
             pass
     logger.info("/api/session/end: sid=%s removed=%s", session_id, existed)
     return EndSessionResponse(ok=True, removed=existed)
+
+
+@app.post("/api/aspect_suggest", response_model=AspectSuggestResponse)
+async def aspect_suggest(req: AspectSuggestRequest):
+    st = get_session(req.session_id)
+    aspect = (req.aspect or "").strip().lower()
+    allowed = {"compliment", "hypothetical", "leading", "pitching", "fluff", "yesno", "vague"}
+    if aspect not in allowed:
+        raise HTTPException(status_code=400, detail="Invalid aspect")
+
+    full_text = "\n".join(st.transcript[-30:])  # last ~30 lines for context
+    sys = (
+        "You are Tiger Mom. Generate ONE concise, neutral, past-behavior question.\n"
+        "The question should address the given MOM Test anti-pattern in the conversation.\n"
+        "- No leading phrasing.\n- No hypotheticals.\n- No solution pitching.\n"
+        "- <= 80 characters.\nReturn ONLY strict JSON: {\"question\": \"...\"}"
+    )
+    user = (
+        f"Aspect: {aspect}\n"
+        f"Context (latest at end):\n{full_text}\n"
+        f"My personal context:\n{st.personal_context}\n"
+    )
+    try:
+        resp = await openai_client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": sys},
+                {"role": "user", "content": user},
+            ],
+            temperature=0.2,
+            response_format={"type": "json_object"},
+            max_tokens=80,
+        )
+        content = resp.choices[0].message.content or "{}"
+        data = json.loads(content)
+        q = (data.get("question") or "").strip()
+        if not q:
+            # Fallback minimal
+            q = "Walk me through the last time."
+        return AspectSuggestResponse(question=q)
+    except Exception as e:
+        logger.exception("/api/aspect_suggest failed: %s", str(e))
+        # Fallback safe
+        return AspectSuggestResponse(question="Walk me through the last time.")
 
 
 @app.post("/api/tts")

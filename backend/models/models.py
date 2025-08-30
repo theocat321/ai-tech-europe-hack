@@ -68,3 +68,14 @@ class HintsResponse(BaseModel):
 class EndSessionResponse(BaseModel):
     ok: bool
     removed: bool
+
+
+# --- Aspect Suggestion ------------------------------------------------------------
+
+class AspectSuggestRequest(BaseModel):
+    session_id: str
+    aspect: str  # one of: compliment, hypothetical, leading, pitching, fluff, yesno, vague
+
+
+class AspectSuggestResponse(BaseModel):
+    question: str
