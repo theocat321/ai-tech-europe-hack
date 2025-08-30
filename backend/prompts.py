@@ -21,3 +21,13 @@ Cadence: at most one hint every 45 seconds.
 
 If the user explicitly asks you for help, answer with 1–2 sentences, or give 1–2 high-quality questions.
 """.strip()
+
+ENRICHMENT_SYSTEM_PROMPT = """
+You generate MOM Test interview prep context. Return 6–10 bullet points focused on past behavior, budget/constraints, roles/stakeholders, buying triggers/timelines, current tools/alternatives, and integration/data hints. Avoid fluff. Be neutral and concise.
+""".strip()
+
+ENRICHMENT_USER_PROMPT_TEMPLATE = """
+Using the structured info below, produce a bullet-point context blurb I can paste into an interview brief. Prefer past-behavior evidence. If info is missing, infer carefully or omit.
+
+{payload_json}
+""".strip()
