@@ -6,12 +6,14 @@ import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 const formSchema = z.object({
   clientName: z.string().min(1, 'Client name is required'),
   clientLinkedInUrl: z.string().url('Must be a valid URL').optional().or(z.literal('')),
+  context: z.string().optional(),
 })
 
 type FormData = z.infer<typeof formSchema>
@@ -20,26 +22,54 @@ export default function HomePage() {
   const navigate = useNavigate()
   const [showForm, setShowForm] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [showContext, setShowContext] = useState(false)
+  const [isEnriching, setIsEnriching] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       clientName: '',
       clientLinkedInUrl: '',
+      context: '',
     },
   })
 
+  const handleEnrich = async () => {
+    const url = form.getValues('clientLinkedInUrl')
+    if (!url) {
+      setError('LinkedIn URL required for enrichment')
+      return
+    }
+    setIsEnriching(true)
+    setError(null)
+    try {
+      const response = await fetch(`${API_URL}/api/enrich_linkedin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      })
+      if (!response.ok) {
+        throw new Error('Failed to enrich context')
+      }
+      const data = await response.json()
+      form.setValue('context', data.autofill_context || '')
+      setShowContext(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Enrichment failed')
+    } finally {
+      setIsEnriching(false)
+    }
+  }
+
+  const handleSkip = () => {
+    form.setValue('context', '')
+    setShowContext(true)
+  }
+
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true)
-
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000))
-
-    console.log('Form submitted:', data)
-    setIsSubmitting(false)
-
-    // Navigate to chat page
-    navigate('/chat')
+    navigate('/chat', { state: { context: data.context, clientName: data.clientName } })
   }
 
   return (
@@ -112,24 +142,76 @@ export default function HomePage() {
                       )}
                     />
 
-                    <div className="flex gap-3 pt-4">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => setShowForm(false)}
-                        disabled={isSubmitting}
-                        className="flex-1"
-                      >
-                        Back
-                      </Button>
-                      <Button
-                        type="submit"
-                        disabled={isSubmitting}
-                        className="flex-1"
-                      >
-                        {isSubmitting ? 'Starting...' : 'Start call'}
-                      </Button>
-                    </div>
+                    {error && <p className="text-red-500">{error}</p>}
+                    {!showContext ? (
+                      <div className="flex gap-3 pt-4">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setShowForm(false)}
+                          disabled={isEnriching || isSubmitting}
+                          className="flex-1"
+                        >
+                          Back
+                        </Button>
+                        <Button
+                          type="button"
+                          onClick={handleEnrich}
+                          disabled={isEnriching}
+                          className="flex-1"
+                        >
+                          {isEnriching ? 'Enriching...' : 'Enrich context'}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={handleSkip}
+                          disabled={isEnriching}
+                          className="flex-1"
+                        >
+                          Skip
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
+                        <FormField
+                          control={form.control}
+                          name="context"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel htmlFor="context">Context</FormLabel>
+                              <FormControl>
+                                <textarea
+                                  id="context"
+                                  rows={6}
+                                  className="w-full border rounded-md p-2"
+                                  {...field}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <div className="flex gap-3 pt-4">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setShowContext(false)}
+                            disabled={isSubmitting}
+                            className="flex-1"
+                          >
+                            Back
+                          </Button>
+                          <Button
+                            type="submit"
+                            disabled={isSubmitting}
+                            className="flex-1"
+                          >
+                            {isSubmitting ? 'Starting...' : 'Start call'}
+                          </Button>
+                        </div>
+                      </>
+                    )}
                   </form>
                 </Form>
               </CardContent>
