@@ -1,6 +1,5 @@
 //
 import { useLocation, Link } from 'react-router-dom'
-import { useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
@@ -61,10 +60,6 @@ function Donut({ value, total, label }: { value: number; total: number; label: s
 export default function SummaryPage() {
   const location = useLocation()
   const { stats, timeline, hintTimes } = (location.state as { stats?: Stats; timeline?: TimelinePoint[]; hintTimes?: number[] }) || {}
-  const [showDonuts, setShowDonuts] = useState(true)
-  const [showWarnings, setShowWarnings] = useState(true)
-  const [showHints, setShowHints] = useState(true)
-  const [showAspects, setShowAspects] = useState(true)
 
   if (!stats) {
     return (
@@ -168,88 +163,51 @@ export default function SummaryPage() {
           </Card>
         </div>
 
+        {/* Mom Test Anti‑Patterns (Second Row) */}
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-sm font-medium">Mom Test Anti‑Patterns</div>
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+              {aspectEntries.map(([key, val]) => (
+                <BarRow key={key} label={aspectLabels[key] || key} value={val} max={maxAspect} />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
         {/* 2-column layout: left (two halves) + right (full) */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Left column: donuts (top half) + hints (bottom half) */}
           <div className="flex flex-col gap-4">
-            <Card className={showDonuts ? undefined : 'py-2 gap-2'}>
-              <CardContent className={showDonuts ? 'px-4 py-3' : 'px-3 py-2'}>
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-medium">Flow vs Warned</div>
-                  <Button variant="ghost" size="sm" onClick={() => setShowDonuts(v => !v)} aria-expanded={showDonuts}>
-                    {showDonuts ? '▾' : '▸'}
-                  </Button>
-                </div>
-                {showDonuts && (
-                  <div className="mt-2 h-40 md:h-48 w-full flex items-center justify-center">
-                    <div className="flex items-center justify-between gap-6 w-full max-w-lg">
-                      <Donut value={flowVsWarned.flow} total={(timeline || []).length || stats.segments} label="Flow segments" />
-                      <Donut value={flowVsWarned.warned} total={(timeline || []).length || stats.segments} label="Warned segments" />
-                    </div>
+            <Card>
+              <CardContent className="px-4 py-3">
+                <div className="text-sm font-medium">Flow vs Warned</div>
+                <div className="mt-2 h-20 md:h-24 w-full flex items-center justify-center">
+                  <div className="flex items-center justify-between gap-6 w-full max-w-lg">
+                    <Donut value={flowVsWarned.flow} total={(timeline || []).length || stats.segments} label="Flow segments" />
+                    <Donut value={flowVsWarned.warned} total={(timeline || []).length || stats.segments} label="Warned segments" />
                   </div>
-                )}
+                </div>
               </CardContent>
             </Card>
 
-            <Card className={showHints ? undefined : 'py-2 gap-2'}>
-              <CardContent className={showHints ? 'px-4 py-3' : 'px-3 py-2'}>
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-medium">Hints per minute</div>
-                  <Button variant="ghost" size="sm" onClick={() => setShowHints(v => !v)} aria-expanded={showHints}>
-                    {showHints ? '▾' : '▸'}
-                  </Button>
-                </div>
-                {showHints && (
-                  <div className="mt-2">
-                    {(() => {
-                      const hintsData = hintsPerMinute.map((v, i) => ({ index: i + 1, hints: v }))
-                      return (
-                    <ChartContainer
-                      config={{ hints: { label: 'Hints', color: '#10b981' } }}
-                      className="w-full h-40 md:h-48"
-                        >
-                          <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={hintsData} margin={{ left: 6, right: 6, top: 10, bottom: 0 }}>
-                              <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                              <XAxis dataKey="index" tickLine={false} axisLine={false} fontSize={12} />
-                              <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
-                              <Line type="monotone" dataKey="hints" stroke="var(--color-hints)" strokeWidth={2} dot={false} />
-                              <ChartTooltip content={<ChartTooltipContent />} cursor={{ stroke: 'hsl(var(--muted))' }} />
-                            </LineChart>
-                          </ResponsiveContainer>
-                        </ChartContainer>
-                      )
-                    })()}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Right column: warnings (full height) */}
-          <Card className={showWarnings ? undefined : 'py-2 gap-2'}>
-            <CardContent className={showWarnings ? 'px-4 py-3' : 'px-3 py-2'}>
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-medium">Segment warnings over time</div>
-                <Button variant="ghost" size="sm" onClick={() => setShowWarnings(v => !v)} aria-expanded={showWarnings}>
-                  {showWarnings ? '▾' : '▸'}
-                </Button>
-              </div>
-              {showWarnings && (
+            <Card>
+              <CardContent className="px-4 py-3">
+                <div className="text-sm font-medium">Hints per minute</div>
                 <div className="mt-2">
                   {(() => {
-                    const data = sparkPoints.map((v, i) => ({ index: i + 1, warned: v }))
+                    const hintsData = hintsPerMinute.map((v, i) => ({ index: i + 1, hints: v }))
                     return (
                       <ChartContainer
-                        config={{ warned: { label: 'Warned', color: '#ef4444' } }}
-                        className="w-full h-80 md:h-96"
+                        config={{ hints: { label: 'Hints', color: '#10b981' } }}
+                        className="w-full h-20 md:h-24"
                       >
                         <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={data} margin={{ left: 6, right: 6, top: 10, bottom: 0 }}>
+                          <LineChart data={hintsData} margin={{ left: 6, right: 6, top: 10, bottom: 0 }}>
                             <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                             <XAxis dataKey="index" tickLine={false} axisLine={false} fontSize={12} />
-                            <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} domain={[0, 'dataMax + 1']} />
-                            <Line type="monotone" dataKey="warned" stroke="var(--color-warned)" strokeWidth={2} dot={false} />
+                            <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
+                            <Line type="monotone" dataKey="hints" stroke="var(--color-hints)" strokeWidth={2} dot={false} />
                             <ChartTooltip content={<ChartTooltipContent />} cursor={{ stroke: 'hsl(var(--muted))' }} />
                           </LineChart>
                         </ResponsiveContainer>
@@ -257,31 +215,38 @@ export default function SummaryPage() {
                     )
                   })()}
                 </div>
-              )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Right column: warnings (half height vs previous) */}
+          <Card>
+            <CardContent className="px-4 py-3">
+              <div className="text-sm font-medium">Segment warnings over time</div>
+              <div className="mt-2">
+                {(() => {
+                  const data = sparkPoints.map((v, i) => ({ index: i + 1, warned: v }))
+                  return (
+                    <ChartContainer
+                      config={{ warned: { label: 'Warned', color: '#ef4444' } }}
+                      className="w-full h-40 md:h-48"
+                    >
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={data} margin={{ left: 6, right: 6, top: 10, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                          <XAxis dataKey="index" tickLine={false} axisLine={false} fontSize={12} />
+                          <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} domain={[0, 'dataMax + 1']} />
+                          <Line type="monotone" dataKey="warned" stroke="var(--color-warned)" strokeWidth={2} dot={false} />
+                          <ChartTooltip content={<ChartTooltipContent />} cursor={{ stroke: 'hsl(var(--muted))' }} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </ChartContainer>
+                  )
+                })()}
+              </div>
             </CardContent>
           </Card>
         </div>
-
-
-
-        {/* Aspect Bars */}
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-medium">Mom Test Anti‑Patterns</div>
-              <Button variant="ghost" size="sm" onClick={() => setShowAspects(v => !v)}>
-                {showAspects ? 'Hide' : 'Show'}
-              </Button>
-            </div>
-            {showAspects && (
-              <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
-                {aspectEntries.map(([key, val]) => (
-                  <BarRow key={key} label={aspectLabels[key] || key} value={val} max={maxAspect} />
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
       </div>
     </div>
   )
