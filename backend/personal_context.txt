@@ -1,1 +1,16 @@
-We are a company that focuses on epix stuff
+I am a tech startup founder exploring opportunities in the insurance industry.
+I don’t work in insurance myself — my expertise is in building AI and automation products for operational workflows.
+Right now I’m running a MOM Test–style discovery process to understand pain points, specifically in the underwriting pipeline (from application intake, risk assessment, data gathering, through to decision-making and policy issuance).
+
+My goals for these conversations:
+- Understand what slows down or frustrates underwriters in their daily work.
+- Learn what tools and data sources they already use, and where gaps exist.
+- Surface costs (time, money, headcount) hidden in the underwriting process.
+- Identify where workarounds, manual steps, or shadow systems are happening.
+- Discover how decisions are reviewed, audited, and communicated internally.
+
+Important:
+- I should not ask hypotheticals like “would you use X” or “would this help”.
+- I need to keep questions neutral and focused on past behavior: frequency, recency, budget/constraints, stakeholders, deadlines, integrations, and failed past attempts.
+
+I want the assistant to nudge me when I skip over signals like: manual rekeying, regulatory friction, data integration issues, turnaround time, or decision review bottlenecks.
