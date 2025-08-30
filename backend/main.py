@@ -122,7 +122,7 @@ def read_personal_context() -> str:
         return ""
 
 
-def make_instructions(client_context: str, personal_context: str) -> str:
+def make_instructions(client_context: str, personal_context: str, speak_hints: bool = False) -> str:
     client_context = (client_context or "").strip()
     personal_context = (personal_context or "").strip()
     personal_context_section = (
@@ -133,7 +133,8 @@ def make_instructions(client_context: str, personal_context: str) -> str:
         if client_context
         else ""
     )
-    return BASE_BEHAVIOR + personal_context_section + client_context_section
+    speak_section = "\n\nSPEAK_HINTS: true" if speak_hints else "\n\nSPEAK_HINTS: false"
+    return BASE_BEHAVIOR + personal_context_section + client_context_section + speak_section
 
 
 # --- Enrichment Endpoint Helpers ---------------------------------------------------
@@ -360,7 +361,7 @@ async def create_realtime_client_secret(
     session_cfg = {
         "model": OPENAI_REALTIME_MODEL,
         **({"voice": voice} if voice else {}),
-        "instructions": make_instructions(user_context, read_personal_context()),
+        "instructions": make_instructions(user_context, read_personal_context(), speak_hints=bool(voice)),
         "tools": [
             {
                 "type": "function",
