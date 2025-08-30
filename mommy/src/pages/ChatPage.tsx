@@ -1,10 +1,12 @@
 import * as React from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useLocation } from "react-router-dom"
 import { ArrowLeft, Mic, MicOff } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 interface Message {
   id: string
@@ -16,6 +18,10 @@ interface Message {
 
 export default function ChatPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const context = (location.state as { context?: string })?.context || ''
+  const [clientSecret, setClientSecret] = React.useState<string | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
   const [isListening, setIsListening] = React.useState(true)
   const [isLoading, setIsLoading] = React.useState(false)
   const [messages, setMessages] = React.useState<Message[]>([
@@ -27,6 +33,32 @@ export default function ChatPage() {
       initials: "AI",
     },
   ])
+
+  React.useEffect(() => {
+    const startSession = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/realtime`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ context }),
+        })
+        if (!res.ok) {
+          throw new Error('Failed to start session')
+        }
+        const data = await res.json()
+        setClientSecret(data.client_secret)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to start session')
+      }
+    }
+    startSession()
+  }, [context])
+
+  React.useEffect(() => {
+    if (clientSecret) {
+      console.log('client secret', clientSecret)
+    }
+  }, [clientSecret])
 
   // Example: simulated incoming AI message while "listening"
   React.useEffect(() => {
@@ -91,6 +123,10 @@ export default function ChatPage() {
             </div>
           </div>
         </div>
+
+        {error && (
+          <p className="text-red-500 text-center mt-4">{error}</p>
+        )}
 
         {/* Messages */}
         <div className="relative flex-1 w-full overflow-y-auto px-4 py-4">
