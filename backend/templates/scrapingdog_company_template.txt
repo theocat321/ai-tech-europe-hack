@@ -1,0 +1,19 @@
+## Autofill Context (Company)
+
+- Company: ExampleCorp
+- Tagline: Building delightful products
+- Industry: Computer Software
+- Size: 201–500 employees
+- Founded: 2015
+- Website: https://www.example.com
+
+Recent highlights:
+- Launched a new analytics module aimed at SMBs.
+- Hiring across product and engineering; likely scaling processes.
+- Focused on usability and time-to-value in marketing pages.
+
+Suggested starter questions:
+- What customer segment is driving most recent growth?
+- Where do prospects get stuck during evaluation or onboarding?
+- What “job-to-be-done” matters most for new customers?
+

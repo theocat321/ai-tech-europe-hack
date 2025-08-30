@@ -21,6 +21,7 @@ class RealtimeResponse(BaseModel):
 
 class WhisperRequest(BaseModel):
     text: str
+    voice_description: Optional[str] = None
 
 
 # --- Enrichment Endpoint Models ----------------------------------------------------

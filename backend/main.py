@@ -3,10 +3,11 @@ import re
 import json
 import logging
 from typing import Optional, Dict, Any, Tuple, List
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, StreamingResponse, PlainTextResponse, Response
 import httpx
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
@@ -43,12 +44,26 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_REALTIME_MODEL = os.getenv("OPENAI_REALTIME_MODEL", "gpt-4o-realtime-preview-2024-12-17")
 ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 ELEVEN_MODEL = os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2_5")
-ELEVEN_VOICE = os.getenv("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")
+ELEVEN_VOICE_RAW = os.getenv("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")
 SCRAPINGDOG_API_KEY = os.getenv("SCRAPINGDOG_API_KEY")
 ACI_API_KEY = os.getenv("ACI_API_KEY")
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "")
 
 PERSONAL_CONTEXT_FILE = "personal_context.txt"
+
+
+def _parse_bool(val: Optional[str], default: bool = True) -> bool:
+    if val is None:
+        return default
+    v = val.strip().lower()
+    return v in {"1", "true", "t", "yes", "y", "on"}
+
+
+# Allow either lowercase or uppercase env var names in .env
+ENABLED_SCRAPINGDOG = _parse_bool(
+    os.getenv("enabled_scrapingdog", os.getenv("ENABLED_SCRAPINGDOG", None)),
+    default=True,
+)
 
 # --- FastAPI App Initialization ----------------------------------------------------
 
@@ -76,6 +91,25 @@ if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY missing")
 
 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+
+
+def _sanitize_eleven_voice(v: str) -> str:
+    v = (v or "").strip()
+    # If someone accidentally concatenated credentials (e.g., contains 'sk-'), drop to default
+    if "sk-" in v:
+        logger.warning("ELEVENLABS_VOICE_ID appears invalid (contains 'sk-'); using default voice")
+        return "pNInz6obpgDQGcFmaJgB"
+    # If whitespace present, take first token
+    if any(c.isspace() for c in v):
+        v = v.split()[0]
+    # Basic length sanity check
+    if len(v) < 10 or len(v) > 80:
+        logger.warning("ELEVENLABS_VOICE_ID length suspicious (%d); using default voice", len(v))
+        return "pNInz6obpgDQGcFmaJgB"
+    return v
+
+
+ELEVEN_VOICE = _sanitize_eleven_voice(ELEVEN_VOICE_RAW)
 
 
 # --- Helper Functions --------------------------------------------------------------
@@ -239,21 +273,44 @@ async def enrich_linkedin(
     payload: EnrichLinkedInRequest,
     client: httpx.AsyncClient = Depends(get_http_client)
 ):
-    if not all([SCRAPINGDOG_API_KEY, ACI_API_KEY, OPENAI_API_KEY]):
-        raise HTTPException(status_code=400, detail="A required API key is missing on the server.")
-
     link_type, link_id = parse_linkedin_kind_and_id(payload.url)
+
+    # If scrapingdog is disabled, serve markdown template directly as autofill context
+    if not ENABLED_SCRAPINGDOG:
+        base = Path(__file__).parent
+        tpl_dir = base / "templates"
+        if link_type == "profile":
+            path = tpl_dir / "scrapingdog_profile_template.txt"
+        else:  # company
+            path = tpl_dir / "scrapingdog_company_template.txt"
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                md = f.read().strip()
+        except FileNotFoundError:
+            raise HTTPException(status_code=500, detail=f"Template file not found: {path}")
+
+        return EnrichLinkedInResponse(
+            input_url=payload.url,
+            person=None,
+            company=None,
+            search_results=None,
+            autofill_context=md,
+        )
+
+    # When enabled, require OpenAI and Scrapingdog keys
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=400, detail="OPENAI_API_KEY is missing on the server.")
+    if not SCRAPINGDOG_API_KEY:
+        raise HTTPException(status_code=400, detail="SCRAPINGDOG_API_KEY is missing on the server.")
 
     person_data, company_data, search_results = None, None, None
     company_name_for_search = None
 
     if link_type == "profile":
         person_data = await scrapingdog_get(client, "profile", link_id)
-        # Get company name from the most recent experience for search, without a new API call
         if person_data.get("experience"):
             company_name_for_search = person_data["experience"][0].get("company_name")
-
-    elif link_type == "company":
+    else:  # company
         company_data = await scrapingdog_get(client, "company", link_id)
         company_name_for_search = company_data.get("company_name")
 
@@ -308,7 +365,7 @@ async def create_realtime_client_secret(
             {
                 "type": "function",
                 "name": "whisper_hint",
-                "description": "Play a brief whispered hint about a missed MOM Test opportunity.",
+                "description": "Surface a brief hint about a missed MOM Test opportunity (text-only).",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -373,40 +430,61 @@ async def create_realtime_client_secret(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _voice_id_from_description(desc: Optional[str]) -> str:
+    """Very simple mapping from a free-text description to a default voice id.
+    If ELEVEN_VOICE env is valid, prefer that unless a description is explicitly provided.
+    """
+    if desc:
+        d = desc.lower()
+        # Basic heuristics. We can extend this later or fetch voices list to refine.
+        if any(k in d for k in ["tech bro", "male", "casual", "american", "british male", "british"]):
+            return "pNInz6obpgDQGcFmaJgB"  # generic male default
+        if any(k in d for k in ["female", "woman", "neutral female", "calm", "neutral"]):
+            return "EXAVITQu4vr4xnSDxMaL"  # common public female voice id
+    return ELEVEN_VOICE
+
+
 @app.post("/api/whisper")
-def elevenlabs_whisper(
+async def elevenlabs_whisper(
     payload: WhisperRequest,
     client: httpx.AsyncClient = Depends(get_http_client)
 ):
     if not ELEVEN_API_KEY:
-        raise RuntimeError("ELEVENLABS_API_KEY missing")
+        logger.error("/api/whisper called but ELEVENLABS_API_KEY missing")
+        raise HTTPException(status_code=500, detail="Server missing ELEVENLABS_API_KEY")
 
     text: str = (payload.text or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="Text is required")
 
     whisper_text = f"[whispers] {text}"
-    eleven_url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_VOICE}/stream"
+    selected_voice = _voice_id_from_description(payload.voice_description)
+    eleven_url = f"https://api.elevenlabs.io/v1/text-to-speech/{selected_voice}/stream"
     q = {"model_id": ELEVEN_MODEL, "text": whisper_text, "output_format": "mp3_22050_32"}
 
-    async def gen():
-        try:
-            async with client.stream(
-                "POST",
-                eleven_url,
-                headers={
-                    "xi-api-key": ELEVEN_API_KEY,
-                    "Content-Type": "application/json",
-                    "Accept": "audio/mpeg",
-                },
-                json=q,
-            ) as resp:
-                resp.raise_for_status()
-                async for chunk in resp.aiter_bytes():
-                    yield chunk
-        except httpx.HTTPStatusError as e:
-            yield f"Error: {e.response.status_code} - {e.response.text}".encode()
-        except Exception as e:
-            yield f"Error: {e}".encode()
+    logger.info("/api/whisper: model=%s voice=%s text_len=%d", ELEVEN_MODEL, selected_voice, len(whisper_text))
 
-    return StreamingResponse(gen(), media_type="audio/mpeg")
+    try:
+        resp = await client.post(
+            eleven_url,
+            headers={
+                "xi-api-key": ELEVEN_API_KEY,
+                "Content-Type": "application/json",
+                "Accept": "audio/mpeg",
+            },
+            json=q,
+        )
+        logger.info("/api/whisper elevenlabs status=%d", resp.status_code)
+        resp.raise_for_status()
+        audio_bytes = resp.content
+        if not audio_bytes:
+            logger.error("/api/whisper: empty audio body from ElevenLabs")
+            raise HTTPException(status_code=502, detail="Empty audio from ElevenLabs")
+        return Response(content=audio_bytes, media_type="audio/mpeg")
+    except httpx.HTTPStatusError as e:
+        detail = e.response.text[:512]
+        logger.error("/api/whisper HTTPStatusError %d: %s", e.response.status_code, detail)
+        return JSONResponse({"error": detail}, status_code=e.response.status_code)
+    except Exception as e:
+        logger.exception("/api/whisper unexpected error: %s", str(e))
+        return JSONResponse({"error": str(e)}, status_code=502)

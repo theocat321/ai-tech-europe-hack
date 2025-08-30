@@ -44,7 +44,34 @@ export default function ChatPage() {
   const pcRef = React.useRef<RTCPeerConnection | null>(null)
   const eventsDcRef = React.useRef<RTCDataChannel | null>(null)
   const localStreamRef = React.useRef<MediaStream | null>(null)
-  const remoteAudioRef = React.useRef<HTMLAudioElement | null>(null)
+  // Text-only hints: no whisper audio playback
+  const audioCtxRef = React.useRef<AudioContext | null>(null)
+  const chimeEnabledRef = React.useRef<boolean>(true)
+
+  const playChime = React.useCallback(async () => {
+    if (!chimeEnabledRef.current) return
+    try {
+      let ctx = audioCtxRef.current
+      if (!ctx) {
+        ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
+        audioCtxRef.current = ctx
+      }
+      if (ctx.state === 'suspended') await ctx.resume()
+      const duration = 0.18
+      const o = ctx.createOscillator()
+      const g = ctx.createGain()
+      o.type = 'sine'
+      o.frequency.value = 880
+      g.gain.setValueAtTime(0.001, ctx.currentTime)
+      g.gain.exponentialRampToValueAtTime(0.1, ctx.currentTime + 0.02)
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration)
+      o.connect(g).connect(ctx.destination)
+      o.start()
+      o.stop(ctx.currentTime + duration)
+    } catch {
+      // ignore audio errors
+    }
+  }, [])
 
   const appendMessage = React.useCallback((text: string, isUser = false) => {
     setMessages((prev) => [
@@ -59,26 +86,7 @@ export default function ChatPage() {
     ])
   }, [])
 
-  const playWhisper = React.useCallback(async (text: string) => {
-    try {
-      const res = await fetch(`${API_URL}/api/whisper`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      })
-      if (!res.ok || !res.body) {
-        throw new Error('Failed to fetch whisper audio')
-      }
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const audio = new Audio(url)
-      audio.play().catch(() => {/* ignore */})
-      audio.onended = () => URL.revokeObjectURL(url)
-    } catch (e) {
-      // Do not block chat on whisper failures
-      console.error('whisper error', e)
-    }
-  }, [])
+  // No-op; whisper audio removed
 
   // Start server session to get client secret
   React.useEffect(() => {
@@ -113,12 +121,8 @@ export default function ChatPage() {
         pc = new RTCPeerConnection()
         pcRef.current = pc
 
-        // Remote audio
-        pc.ontrack = (e) => {
-          if (!remoteAudioRef.current) return
-          remoteAudioRef.current.srcObject = e.streams[0]
-          remoteAudioRef.current.play().catch(() => {/* autoplay may be blocked */})
-        }
+        // Ignore any remote audio tracks from the model (single TTS path via ElevenLabs only)
+        pc.ontrack = () => {}
 
         // Events data channel from server
         pc.ondatachannel = (evt) => {
@@ -171,10 +175,9 @@ export default function ChatPage() {
           if (name === 'whisper_hint' && typeof args.hint === 'string') {
             const hint: string = args.hint
             const follow: string = args.followup_question || ''
-            // Show a subtle text message and play whisper audio
+            // Show a subtle text message and chime
             appendMessage(`(hint) ${hint}${follow ? ` — Try: ${follow}` : ''}`, false)
-            // Play as whisper audio via backend
-            playWhisper(`${hint}. ${follow}`)
+            playChime()
           }
         }
       } catch (e) {
@@ -202,7 +205,7 @@ export default function ChatPage() {
         localStreamRef.current = null
       }
     }
-  }, [clientSecret, appendMessage, playWhisper])
+  }, [clientSecret, appendMessage, playChime])
 
   // Toggle mic enable/disable when isListening changes
   React.useEffect(() => {
@@ -250,6 +253,7 @@ export default function ChatPage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              {/* Single default whisper voice; dropdown removed */}
               <Button
                 variant={demoMode ? "default" : "outline"}
                 size="sm"
@@ -265,7 +269,7 @@ export default function ChatPage() {
                   const hint = 'They mentioned a workaround; ask the last time it broke.'
                   const follow = 'Walk me through the most recent failure and how you handled it.'
                   appendMessage(`(hint) ${hint} — Try: ${follow}`, false)
-                  playWhisper(`${hint}. ${follow}`)
+                  playChime()
                 }}
                 title={demoMode ? 'Trigger a sample hint' : 'Enable Demo Mode to use'}
               >
@@ -394,8 +398,7 @@ export default function ChatPage() {
             </div>
           </div>
 
-          {/* Hidden audio element for remote TTS */}
-          <audio ref={remoteAudioRef} hidden playsInline />
+          {/* Text-only hints; no whisper audio */}
         </div>
       </div>
     </div>

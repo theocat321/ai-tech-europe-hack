@@ -1,0 +1,20 @@
+## Autofill Context (Profile)
+
+- Name: Jane Doe
+- Role: Product Manager at ExampleCorp
+- Location: San Francisco Bay Area
+
+Key talking points:
+- Recently shipped a cross-team feature improving onboarding by 20%.
+- Cares about user research and rapid iteration cycles.
+- Interested in data-informed decision making and experimentation.
+
+Recent experience:
+- Senior Product Manager, ExampleCorp — 2 yrs 3 mos
+- Product Manager, StartupXYZ — 1 yr 8 mos
+
+Suggested starter questions:
+- What’s the most recent customer problem you’ve validated?
+- How do you currently identify and prioritize user pains?
+- What has been the most surprising learning from recent interviews?
+
