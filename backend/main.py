@@ -26,6 +26,8 @@ from models.models import (
     EndSessionResponse,
     AspectSuggestRequest,
     AspectSuggestResponse,
+    AspectDetectRequest,
+    AspectDetectResponse,
     EnrichLinkedInRequest,
     EnrichLinkedInResponse,
     AspectDetectRequest,
@@ -465,6 +467,15 @@ async def create_realtime_client_secret(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/realtime/end")
+async def end_realtime_session():
+    # Background mode does not maintain a persistent OpenAI realtime session.
+    # This endpoint exists for forward compatibility and to let clients explicitly
+    # signal the end of any realtime calls; nothing to tear down server-side.
+    logger.info("/api/realtime/end: no-op (background mode)")
+    return {"ok": True}
+
+
 def _voice_id_from_description(desc: Optional[str]) -> str:
     """Very simple mapping from a free-text description to a default voice id.
     If ELEVEN_VOICE env is valid, prefer that unless a description is explicitly provided.
@@ -553,8 +564,15 @@ async def stt_chunk(session_id: str, request: Request, client: httpx.AsyncClient
         files = {
             "file": ("audio.webm", body, "audio/webm"),
         }
-        # Force English output by requesting translation to English
-        data = {"model": "whisper-1", "translate": "true"}
+        # Force English output by requesting translation to English and setting target language
+        # OpenAI Whisper accepts form fields as strings.
+        data = {
+            "model": "whisper-1",
+            "translate": "true",
+            "language": "en",
+            "response_format": "json",
+            "temperature": "0",
+        }
         headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
         r = await client.post(
             "https://api.openai.com/v1/audio/transcriptions",
@@ -567,6 +585,8 @@ async def stt_chunk(session_id: str, request: Request, client: httpx.AsyncClient
             raise HTTPException(status_code=502, detail=r.text)
         data = r.json()
         text = (data.get("text") or "").strip()
+        lang = data.get("language") or "?"
+        logger.info("/api/stt_chunk openai ok: text_len=%d lang=%s", len(text), lang)
         if text:
             st.transcript.append(text)
             logger.info("/api/stt_chunk: sid=%s appended text_len=%d total_len=%d", session_id, len(text), sum(len(x) for x in st.transcript))
@@ -688,6 +708,53 @@ async def aspect_suggest(req: AspectSuggestRequest):
         logger.exception("/api/aspect_suggest failed: %s", str(e))
         # Fallback safe
         return AspectSuggestResponse(question="Walk me through the last time.")
+
+
+@app.post("/api/aspect_detect", response_model=AspectDetectResponse)
+async def aspect_detect(req: AspectDetectRequest):
+    st = get_session(req.session_id)
+    segment = (req.text or "").strip()
+    if not segment:
+        return AspectDetectResponse(aspects=[])
+
+    allowed = ["compliment", "hypothetical", "leading", "pitching", "fluff", "yesno", "vague"]
+    full_text = "\n".join(st.transcript[-30:])
+    sys = (
+        "You are Tiger Mom. Classify the latest interview segment for MOM Test anti-patterns.\n"
+        "Allowed labels: compliment, hypothetical, leading, pitching, fluff, yesno, vague.\n"
+        "Return STRICT JSON: {\"aspects\": [<zero or more labels>]} with only allowed labels.\n"
+        "If none apply, return an empty array."
+    )
+    user = (
+        f"Context (older to newer):\n{full_text}\n\n"
+        f"Latest segment to classify:\n{segment}\n"
+    )
+    try:
+        resp = await openai_client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": sys},
+                {"role": "user", "content": user},
+            ],
+            temperature=0.0,
+            response_format={"type": "json_object"},
+            max_tokens=100,
+        )
+        content = resp.choices[0].message.content or "{}"
+        data = json.loads(content)
+        arr = data.get("aspects")
+        if not isinstance(arr, list):
+            return AspectDetectResponse(aspects=[])
+        # Sanitize to allowed set and unique
+        clean = []
+        for k in arr:
+            k = str(k).strip().lower()
+            if k in allowed and k not in clean:
+                clean.append(k)
+        return AspectDetectResponse(aspects=clean)
+    except Exception as e:
+        logger.exception("/api/aspect_detect failed: %s", str(e))
+        return AspectDetectResponse(aspects=[])
 
 
 @app.post("/api/tts")
