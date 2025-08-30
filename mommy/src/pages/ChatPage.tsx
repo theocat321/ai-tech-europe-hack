@@ -440,6 +440,12 @@ export default function ChatPage() {
                     title={isListening ? 'Recording segments' : 'Paused'}
                   />
                   <span className="text-xs text-muted-foreground">Recording</span>
+                  <span
+                    className="text-[10px] px-1.5 py-0.5 rounded border border-neutral-300 bg-neutral-50 text-neutral-700 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-300"
+                    title="Transcription language: English"
+                  >
+                    EN
+                  </span>
                   <span className="ml-auto text-[11px] text-muted-foreground">Seg: {segmentCount}</span>
                 </div>
                 <div className="text-xs text-foreground/90">

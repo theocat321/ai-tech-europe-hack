@@ -546,7 +546,8 @@ async def stt_chunk(session_id: str, request: Request, client: httpx.AsyncClient
         files = {
             "file": ("audio.webm", body, "audio/webm"),
         }
-        data = {"model": "whisper-1"}
+        # Force English output by requesting translation to English
+        data = {"model": "whisper-1", "translate": "true"}
         headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
         r = await client.post(
             "https://api.openai.com/v1/audio/transcriptions",
@@ -580,8 +581,18 @@ async def maybe_make_hint(st: SessionState) -> Optional[Dict[str, str]]:
         logger.info("hint: no new text yet (len=%d)", len(full_text))
         return None
 
-    sys_prompt = BASE_BEHAVIOR + "\n\nReturn ONLY JSON with either {\"no_hint\": true} OR {\"hint\": \"...\", \"followup_question\": \"...\"}. No extra text."
-    user_prompt = f"Transcript so far (latest at end):\n\n{full_text}\n\nAnalyze the latest segment(s) and decide if interviewer missed a MOM Test opportunity."
+    sys_prompt = (
+        "You are a background MOM Test hint analyzer. "
+        "Read the transcript and decide if the INTERVIEWER has just missed an opportunity.\n"
+        "Opportunities include: workaround mentioned, real spend/time, recent timeline/deadline, decision-maker/stakeholders, prior attempts, switching friction, constraints/budget.\n"
+        "Return ONLY strict JSON, no prose. One of: {\"no_hint\": true} OR {\"hint\": \"<=120 chars\", \"followup_question\": \"ONE neutral past-behavior question\"}.\n"
+        "Be concise, neutral, non-leading. If unsure, return {\"no_hint\": true}."
+    )
+    ctx_note = "\n\nContext:\n" + (st.user_context or "")
+    user_prompt = (
+        f"Transcript so far (latest at end):\n\n{full_text}{ctx_note}\n\n"
+        "Analyze ONLY the most recent segment(s). Did the interviewer gloss over an opportunity right now?"
+    )
 
     try:
         resp = await openai_client.chat.completions.create(
@@ -594,6 +605,7 @@ async def maybe_make_hint(st: SessionState) -> Optional[Dict[str, str]]:
             response_format={"type": "json_object"},
         )
         content = resp.choices[0].message.content or "{}"
+        logger.info("hint: raw json resp (trimmed): %s", (content[:200] + ("…" if len(content) > 200 else "")))
         data = json.loads(content)
         st.last_analyzed_len = len(full_text)
         if data.get("no_hint"):
