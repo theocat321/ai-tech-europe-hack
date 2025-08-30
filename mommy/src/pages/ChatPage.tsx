@@ -24,7 +24,9 @@ type OaiEvent = {
 export default function ChatPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const context = (location.state as { context?: string })?.context || ''
+  const context = (location.state as { context?: string, speakHints?: boolean })?.context || ''
+  const initialSpeak = Boolean((location.state as { speakHints?: boolean })?.speakHints)
+  const [speakHints, setSpeakHints] = React.useState<boolean>(initialSpeak)
   const [clientSecret, setClientSecret] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [isListening, setIsListening] = React.useState(true)
@@ -95,7 +97,7 @@ export default function ChatPage() {
         const res = await fetch(`${API_URL}/api/realtime`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ context }),
+          body: JSON.stringify({ context, ...(speakHints ? { voice: 'verse' } : {}) }),
         })
         if (!res.ok) throw new Error('Failed to start session')
         const data = await res.json()
@@ -105,7 +107,7 @@ export default function ChatPage() {
       }
     }
     startSession()
-  }, [context])
+  }, [context, speakHints])
 
   // Establish WebRTC to OpenAI Realtime once we have a client secret
   React.useEffect(() => {
@@ -121,8 +123,15 @@ export default function ChatPage() {
         pc = new RTCPeerConnection()
         pcRef.current = pc
 
-        // Ignore any remote audio tracks from the model (single TTS path via ElevenLabs only)
-        pc.ontrack = () => {}
+        // If speakHints is enabled, play remote audio from Realtime (OpenAI voice)
+        pc.ontrack = (e) => {
+          if (!speakHints) return
+          const audioEl = document.getElementById('realtime-audio') as HTMLAudioElement | null
+          if (audioEl) {
+            audioEl.srcObject = e.streams[0]
+            audioEl.play().catch(() => {/* autoplay may require user gesture */})
+          }
+        }
 
         // Events data channel from server
         pc.ondatachannel = (evt) => {
@@ -175,9 +184,9 @@ export default function ChatPage() {
           if (name === 'whisper_hint' && typeof args.hint === 'string') {
             const hint: string = args.hint
             const follow: string = args.followup_question || ''
-            // Show a subtle text message and chime
+            // Show a subtle text message and optional chime
             appendMessage(`(hint) ${hint}${follow ? ` — Try: ${follow}` : ''}`, false)
-            playChime()
+            if (!speakHints) playChime()
           }
         }
       } catch (e) {
@@ -205,7 +214,7 @@ export default function ChatPage() {
         localStreamRef.current = null
       }
     }
-  }, [clientSecret, appendMessage, playChime])
+  }, [clientSecret, appendMessage, playChime, speakHints])
 
   // Toggle mic enable/disable when isListening changes
   React.useEffect(() => {
@@ -238,6 +247,14 @@ export default function ChatPage() {
                   >
                     Hints Only
                   </span>
+                  {speakHints && (
+                    <span
+                      title="Speaking short hints is enabled"
+                      className="text-[11px] px-2 py-0.5 rounded-full border border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-950/40 dark:text-emerald-300"
+                    >
+                      Speaking
+                    </span>
+                  )}
                   {demoMode && (
                     <span
                       title="Demo mode is ON"
@@ -269,11 +286,19 @@ export default function ChatPage() {
                   const hint = 'They mentioned a workaround; ask the last time it broke.'
                   const follow = 'Walk me through the most recent failure and how you handled it.'
                   appendMessage(`(hint) ${hint} — Try: ${follow}`, false)
-                  playChime()
+                  if (!speakHints) playChime()
                 }}
                 title={demoMode ? 'Trigger a sample hint' : 'Enable Demo Mode to use'}
               >
                 Force Hint Now
+              </Button>
+              <Button
+                variant={speakHints ? "default" : "outline"}
+                size="sm"
+                onClick={() => setSpeakHints((v) => !v)}
+                title="Toggle spoken hints"
+              >
+                {speakHints ? 'Speaking On' : 'Speaking Off'}
               </Button>
               <Button
                 variant={isListening ? "secondary" : "default"}
@@ -398,7 +423,8 @@ export default function ChatPage() {
             </div>
           </div>
 
-          {/* Text-only hints; no whisper audio */}
+          {/* Remote audio for OpenAI Realtime when speakHints is enabled */}
+          <audio id="realtime-audio" hidden playsInline />
         </div>
       </div>
     </div>

@@ -25,6 +25,7 @@ export default function HomePage() {
   const [showContext, setShowContext] = useState(false)
   const [isEnriching, setIsEnriching] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [speakHints, setSpeakHints] = useState<boolean>(false)
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -69,7 +70,7 @@ export default function HomePage() {
 
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true)
-    navigate('/chat', { state: { context: data.context, clientName: data.clientName } })
+    navigate('/chat', { state: { context: data.context, clientName: data.clientName, speakHints } })
   }
 
   return (
@@ -192,7 +193,17 @@ export default function HomePage() {
                             </FormItem>
                           )}
                         />
-                        <div className="flex gap-3 pt-4">
+                        <div className="flex items-center justify-between pt-2">
+                          <label className="text-sm text-muted-foreground flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={speakHints}
+                              onChange={(e) => setSpeakHints(e.target.checked)}
+                            />
+                            Speak hints (OpenAI voice)
+                          </label>
+                        </div>
+                        <div className="flex gap-3 pt-3">
                           <Button
                             type="button"
                             variant="outline"
