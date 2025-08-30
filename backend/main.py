@@ -1,11 +1,19 @@
 import os
 from typing import Optional
 
-from fastapi import FastAPI, Body, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse, PlainTextResponse
 import httpx
 from dotenv import load_dotenv
+
+from models.models import (
+    PersonalContextRequest,
+    PersonalContextResponse,
+    RealtimeRequest,
+    RealtimeResponse,
+    WhisperRequest,
+)
 
 load_dotenv()
 
@@ -92,22 +100,21 @@ def get_personal_context():
     return PlainTextResponse(read_personal_context())
 
 
-@app.post("/api/personal_context")
-async def update_personal_context(payload: dict = Body(...)):
-    content = payload.get("content", "")
+@app.post("/api/personal_context", response_model=PersonalContextResponse)
+async def update_personal_context(payload: PersonalContextRequest):
     with open(PERSONAL_CONTEXT_FILE, "w", encoding="utf-8") as f:
-        f.write(content)
-    return {"status": "ok"}
+        f.write(payload.content)
+    return PersonalContextResponse(status="ok")
 
 
-@app.post("/api/realtime")
-async def create_realtime_client_secret(payload: dict = Body(...)):
+@app.post("/api/realtime", response_model=RealtimeResponse)
+async def create_realtime_client_secret(payload: RealtimeRequest):
     """
     Mint a short-lived client_secret for WebRTC Realtime. The frontend will use it
     as the Bearer token in the 'POST /v1/realtime?model=gpt-realtime' SDP exchange.
     """
-    user_context: str = payload.get("context") or ""
-    voice: Optional[str] = payload.get("voice")  # e.g., "marin" or "cedar" (OpenAI realtime voices)
+    user_context: str = payload.context or ""
+    voice: Optional[str] = payload.voice  # e.g., "marin" or "cedar" (OpenAI realtime voices)
 
     session_cfg = {
         "type": "realtime",
@@ -155,18 +162,18 @@ async def create_realtime_client_secret(payload: dict = Body(...)):
         client_secret = data.get("client_secret", {}).get("value")
         if not client_secret:
             raise HTTPException(status_code=500, detail="No client_secret returned")
-        return {"client_secret": client_secret}
+        return RealtimeResponse(client_secret=client_secret)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/whisper")
-async def elevenlabs_whisper(payload: dict = Body(...)):
+async def elevenlabs_whisper(payload: WhisperRequest):
     """
     Generate a short whispered TTS hint. Keep it LOW LATENCY.
     You can switch ELEVENLABS_MODEL_ID to 'eleven_v3' to fully leverage [whispers] tags.
     """
-    text: str = (payload.get("text") or "").strip()
+    text: str = (payload.text or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="Text is required")
 
