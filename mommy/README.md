@@ -1,69 +1,38 @@
-# React + TypeScript + Vite
+# Tiger Mom Frontend (React + Vite)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Modern, minimal UI for Tiger Mom — a silent Mom‑Test interview coach.
 
-Currently, two official plugins are available:
+## Dev
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      ...tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      ...tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      ...tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```
+npm i
+# Optionally set backend URL: echo VITE_API_URL=http://localhost:8000 > .env.local
+npm run dev  # http://localhost:5173
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Pages
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+- Home: mission‑led hero, LinkedIn enrichment, client context editor.
+- My Context: structured profile (“Who I am”, goals, rules) that feeds backend prompts.
+- Chat (Session): mic capture, hints feed, colored anti‑pattern cards, speaking toggle, pause/resume, end call.
+- Summary: Mom‑Test Score, flow vs warned donuts, warning sparkline, hints/min sparkline, aspect bars.
 
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+## Controls
+
+- Speaking On/Off (header): speaks follow‑ups via OpenAI TTS or plays a chime.
+- Pause/Resume (header): mutes mic immediately.
+- End Call (header): stops recorder + mic, ends backend session, halts hint polling, navigates to Summary.
+- Demo Mode (FAB, bottom‑right): toggle; when ON shows force‑hint and test‑voice FABs.
+- Floating recorder panel: recording indicator, EN badge (English STT), segment count, latest transcript.
+
+## Behavior
+
+- 5s audio segments → backend `/api/stt_chunk` (Whisper, translate=true, language=en).
+- For each segment: `/api/aspect_detect` (LLM) → colored [compliment]/[leading]/… card → `/api/aspect_suggest` generates one concise, neutral, past‑behavior follow‑up (deduped against recent questions).
+- Background hints: `/api/hints` poll adds “(hint) … — Try: …” with same speech/chime logic.
+
+## Notes
+
+- Browsers require a user gesture for audio; click once or use Demo → Test Voice to unlock.
+- End Call immediately halts polling and recording to prevent stray requests.
+- Styling uses shadcn patterns (Cards, Progress) with a clean, Notion‑like top bar and FABs.

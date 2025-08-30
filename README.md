@@ -58,7 +58,7 @@ npm run dev  # http://localhost:5173
 
 - Prepare: On Home, optionally enrich a LinkedIn URL → backend queries ScrapingDog (+ optional ACI/Brave) and synthesizes concise prep bullets via OpenAI.
 - Profile: “My Context” is stored on the server and fed into model instructions to personalize hints.
-- Call: Chat page records mic, posts short `audio/webm` chunks to `/api/stt_chunk` → Whisper transcribes → model classifies anti‑patterns → generates one neutral follow‑up → UI surfaces as a short hint (and optionally speaks it).
+- Call: Chat page records mic, posts short `audio/webm` chunks to `/api/stt_chunk` → Whisper (forced English) transcribes → model classifies anti‑patterns → generates one neutral follow‑up → UI surfaces as a short hint (and optionally speaks it).
 - Summary: End call to see a computed Mom‑Test score, warning timeline, hint rate, and per‑aspect bars.
 
 
@@ -67,9 +67,9 @@ npm run dev  # http://localhost:5173
 - `POST /api/enrich_linkedin` → { url } ⇒ LinkedIn person/company + optional Brave search ⇒ OpenAI synthesis to bullet points.
 - `GET /api/personal_context` / `POST /api/personal_context` → read/write your profile text.
 - `POST /api/session/start` → returns `session_id` for background transcription.
-- `POST /api/stt_chunk?session_id=...` → body: `audio/webm` (opus) bytes ⇒ Whisper transcription; appends to session transcript.
-- `POST /api/aspect_detect` → classifies latest snippet into anti‑patterns (compliment, hypothetical, leading, pitching, fluff, yesno, vague).
-- `POST /api/aspect_suggest` → returns one concise, neutral follow‑up question based on context + aspect.
+- `POST /api/stt_chunk?session_id=...` → body: `audio/webm` (opus) bytes ⇒ Whisper transcription (translate=true, language=en); appends to session transcript.
+- `POST /api/aspect_detect` → LLM classifier for anti‑patterns (compliment, hypothetical, leading, pitching, fluff, yesno, vague) on latest segment.
+- `POST /api/aspect_suggest` → one concise, neutral follow‑up question based on recent transcript + personal context; avoids repeats.
 - `POST /api/tts` → OpenAI TTS (`gpt-4o-mini-tts`) returns `audio/mpeg`.
 - `GET /api/hints` → background hint engine (throttled) returning JSON hints.
 - `POST /api/realtime` → obtains an OpenAI Realtime `client_secret` (for a future WebRTC client).
@@ -77,16 +77,24 @@ npm run dev  # http://localhost:5173
 
 ## Prompts and Behavior
 
-- Base behavior (“Tiger Mom”): silent, only emits hints; focuses on past behavior, constraints, stakeholders; avoids pitching/leading.
-- Dedicated JSON‑only prompts for enrichment, hinting, and anti‑pattern classification ensure predictable parsing.
+- Base behavior (“Tiger Mom”): silent listener; focuses on past behavior, constraints, stakeholders; avoids pitching/leading.
+- JSON‑only prompts for enrichment, hinting, classification, and follow‑up generation ensure predictable parsing.
 
+
+## Frontend Controls
+
+- Speaking toggle (header): when ON, hints and aspect follow‑ups speak a short line; OFF plays a chime.
+- Pause/Resume (header): mutes/unmutes mic capture immediately.
+- End Call (header): stops recorder + mic, ends session, halts hint polling, then navigates to Summary.
+- Demo Mode (bottom‑right FAB): toggles demo; a second FAB appears to Force Hint Now; “Test Voice” validates TTS playback.
+- Floating panel (bottom‑right): shows recording state, English badge, segment count, and latest transcript.
 
 ## Development Notes
 
 - Sessions are in‑memory and ephemeral; restart clears them. Consider persisting if you need history.
-- Audio: Browser `MediaRecorder` sends `audio/webm;codecs=opus`; backend posts multipart to OpenAI Whisper.
+- Audio: Browser `MediaRecorder` sends 5‑second `audio/webm;codecs=opus` segments; backend posts multipart to OpenAI Whisper with `translate=true` and `language=en`.
 - Enrichment: If ScrapingDog is disabled, the backend serves template markdown to keep the flow working.
-- Voice: Hints can be a chime or short TTS line. ElevenLabs support is optional; OpenAI TTS is available under `/api/tts`.
+- Voice: Hints can be a chime or short TTS line via `/api/tts` (OpenAI `gpt-4o-mini-tts`). ElevenLabs is optional and not required.
 
 
 ## Troubleshooting
@@ -95,6 +103,7 @@ npm run dev  # http://localhost:5173
 - 401/403 from OpenAI: verify `OPENAI_API_KEY` and model names.
 - Whisper errors on chunks: ensure you’re sending `audio/webm` and not empty bodies; check browser permissions.
 - Enrichment fails: populate `SCRAPINGDOG_API_KEY` and/or set `ENABLED_SCRAPINGDOG=false` to use templates.
+- No audio: browsers require a user gesture; click once to unlock audio; use Demo → Test Voice.
 
 
 ## Roadmap (optional)
