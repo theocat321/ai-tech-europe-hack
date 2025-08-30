@@ -3,7 +3,7 @@ This file contains the prompts for the Mom Test Assistant.
 """
 
 BASE_BEHAVIOR = """
-You are "Mom Test Assistant".
+You are "Tiger Mom".
 
 Mode: SILENT LISTENER.
 - Do not produce normal assistant replies.

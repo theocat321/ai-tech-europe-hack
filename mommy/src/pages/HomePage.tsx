@@ -4,7 +4,7 @@ import ReactMarkdown from "react-markdown"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea" // ensure this component exists in your shadcn set
+import { Textarea } from "@/components/ui/textarea"
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000"
 
@@ -86,30 +86,62 @@ export default function HomePage() {
   }
 
   return (
-    <div className="min-h-screen w-full bg-gradient-to-br from-rose-200 via-rose-100 to-rose-200 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
-      <div className="mx-auto w-full max-w-6xl px-4 py-10">
-        {/* Header / Title */}
-        <div className="mb-10">
-          <h1 className="text-4xl md:text-5xl font-bold tracking-tight bg-gradient-to-r from-rose-600 to-pink-600 bg-clip-text text-transparent">
-            AI Chat Assistant
+    <div className="min-h-screen w-full bg-gradient-to-b from-rose-50 via-white to-rose-50 dark:from-gray-950 dark:via-black dark:to-gray-950">
+      <div className="mx-auto w-full max-w-6xl px-4 py-12">
+        {/* Hero */}
+        <div className="mb-12">
+          <div className="inline-flex items-center gap-2 rounded-full border bg-card/60 px-3 py-1 text-xs text-muted-foreground">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            Tiger Mom — Silent Listener Coach
+          </div>
+          <h1 className="mt-4 text-4xl md:text-6xl font-semibold tracking-tight">
+            Ask about facts, not opinions.
           </h1>
-          <p className="mt-2 text-muted-foreground">
-            Set up your client context and aim, then start the call.
+          <p className="mt-3 max-w-2xl text-base md:text-lg text-muted-foreground">
+            Tiger Mom quietly listens to your customer interviews and nudges you to dig deeper when it matters — workarounds, spend, timelines, and stakeholders.
           </p>
+          {!showForm && (
+            <div className="mt-8 flex items-end gap-3">
+              <Button size="lg" onClick={() => setShowForm(true)} className="text-base px-6">
+                Start Preparing
+              </Button>
+              <a
+                href="https://momtestbook.com/" target="_blank" rel="noreferrer"
+                className="text-sm text-muted-foreground hover:underline pb-1"
+              >
+                What is the Mom Test?
+              </a>
+            </div>
+          )}
         </div>
 
-        {!showForm ? (
-          <div className="mt-16">
-            <Button size="lg" onClick={() => setShowForm(true)} className="text-lg px-8 py-3">
-              I&apos;m Ready
-            </Button>
+        {/* Pillars */}
+        {!showForm && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
+            {[{
+              title: 'Workarounds', desc: 'Catch improvised fixes and failure points that reveal real pain.'
+            }, {
+              title: 'Money & Time', desc: 'Notice concrete spend and time costs instead of vague interest.'
+            }, {
+              title: 'Timeline & Roles', desc: 'Surface deadlines and decision-makers behind the scenes.'
+            }].map((c) => (
+              <div key={c.title} className="rounded-xl border bg-white/90 dark:bg-gray-900/90 p-5 shadow-sm">
+                <div className="text-sm font-semibold">{c.title}</div>
+                <p className="mt-1.5 text-sm text-muted-foreground">{c.desc}</p>
+              </div>
+            ))}
           </div>
-        ) : (
+        )}
+
+        {showForm && (
           <form onSubmit={onSubmit} className="relative">
-            {/* Two-column layout on desktop */}
             <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
               {/* Left column */}
-              <section>
+              <section className="rounded-xl border bg-white/90 dark:bg-gray-900/90 p-5 shadow-sm">
+                <div className="mb-3">
+                  <h2 className="text-lg font-semibold">Client Setup</h2>
+                  <p className="text-sm text-muted-foreground">Provide the minimum info needed to start.</p>
+                </div>
                 <div className="space-y-5">
                   <div>
                     <label htmlFor="clientName" className="block text-sm font-medium mb-1">
@@ -159,16 +191,19 @@ export default function HomePage() {
                     />
                   </div>
 
-                  <div className="pt-2">
+                  <div className="pt-2 flex gap-2">
                     <Button type="button" variant="outline" onClick={() => setShowForm(false)} disabled={isSubmitting || isEnriching}>
                       Back
+                    </Button>
+                    <Button type="submit" disabled={isSubmitting}>
+                      {isSubmitting ? "Starting…" : "Start call"}
                     </Button>
                   </div>
                 </div>
               </section>
 
               {/* Right column: Context (markdown by default, Edit toggle) */}
-              <section>
+              <section className="rounded-xl border bg-white/90 dark:bg-gray-900/90 p-5 shadow-sm">
                 <div className="mb-2 flex items-center justify-between">
                   <label htmlFor="context" className="block text-sm font-medium">
                     Enriched Context
@@ -201,12 +236,7 @@ export default function HomePage() {
               </section>
             </div>
 
-            {/* Fixed Start button */}
-            <div className="fixed right-6 bottom-6">
-              <Button type="submit" size="lg" disabled={isSubmitting}>
-                {isSubmitting ? "Starting…" : "Start call"}
-              </Button>
-            </div>
+            {/* Start/Back buttons are next to each other above */}
           </form>
         )}
       </div>

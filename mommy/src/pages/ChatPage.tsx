@@ -231,9 +231,9 @@ export default function ChatPage() {
               </Button>
               <div>
                 <h1 className="text-lg font-semibold flex items-center gap-2">
-                  AI Chat Session
+                  Tiger Mom Session
                   <span
-                    title="Silent listener: only whispers hints"
+                    title="Silent listener: hints only"
                     className="text-[11px] px-2 py-0.5 rounded-full border border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-300"
                   >
                     Hints Only
