@@ -5,6 +5,8 @@
 
 :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  min-height: 100vh;
+
   line-height: 1.5;
   font-weight: 400;
 
@@ -62,10 +64,8 @@ a:hover {
 
 body {
   margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
   min-height: 100vh;
+  width: 100%;
 }
 
 h1 {
@@ -185,6 +185,7 @@ button:focus-visible {
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply bg-background text-foreground;
   }
