@@ -137,6 +137,7 @@ class SessionState:
         self.transcript: List[str] = []
         self.last_hint_ts: float = 0.0
         self.last_analyzed_len: int = 0
+        self.last_questions: List[str] = []  # recent follow-up questions to avoid repetition
 
 
 SESSIONS: Dict[str, SessionState] = {}
@@ -674,17 +675,40 @@ async def aspect_suggest(req: AspectSuggestRequest):
     if aspect not in allowed:
         raise HTTPException(status_code=400, detail="Invalid aspect")
 
-    full_text = "\n".join(st.transcript[-30:])  # last ~30 lines for context
+    # Build richer context window
+    recent_lines = st.transcript[-40:]
+    full_text = "\n".join(recent_lines)
+    last_segment = recent_lines[-1] if recent_lines else ""
+    recent_questions = st.last_questions[-8:]
+
+    # High quality guidance with examples per aspect
     sys = (
-        "You are Tiger Mom. Generate ONE concise, neutral, past-behavior question.\n"
-        "The question should address the given MOM Test anti-pattern in the conversation.\n"
-        "- No leading phrasing.\n- No hypotheticals.\n- No solution pitching.\n"
-        "- <= 80 characters.\nReturn ONLY strict JSON: {\"question\": \"...\"}"
+        "You are Tiger Mom. Produce ONE concise, neutral FOLLOW‑UP question grounded in past behavior.\n"
+        "Constraints:\n"
+        "- Keep it <= 80 characters.\n"
+        "- No leading phrasing (avoid suggesting an answer).\n"
+        "- No hypotheticals or opinions; anchor to a specific recent event.\n"
+        "- No solution pitching or feature language.\n"
+        "- Prefer concrete anchors: last time, most recent instance, who/when/how long/how much.\n"
+        "- If the context lacks detail, ask for a specific example instead of generic questions.\n"
+        "Return ONLY strict JSON: {\"question\": \"...\"}.\n"
+        "Aspect-specific nudges (examples, DO NOT copy verbatim):\n"
+        "- compliment → Ask for the last instance details (timeline, action taken).\n"
+        "- hypothetical → Replace with the most recent real occurrence.\n"
+        "- leading → Convert to a neutral walk‑through request.\n"
+        "- pitching → Pull back to what they tried and what broke.\n"
+        "- fluff → Ask for numbers/frequency/duration in a recent period.\n"
+        "- yesno → Replace with an open, past walk‑through.\n"
+        "- vague → Ask for a specific recent example.\n"
     )
+    avoid_section = ("\nPreviously asked (avoid repeating):\n- " + "\n- ".join(recent_questions)) if recent_questions else ""
     user = (
         f"Aspect: {aspect}\n"
-        f"Context (latest at end):\n{full_text}\n"
-        f"My personal context:\n{st.personal_context}\n"
+        f"Personal context (for relevance):\n{st.personal_context}\n\n"
+        f"Call context (operator notes):\n{st.user_context}\n\n"
+        f"Transcript window (older→newer):\n{full_text}\n\n"
+        f"Latest segment to react to:\n{last_segment}\n"
+        f"{avoid_section}"
     )
     try:
         resp = await openai_client.chat.completions.create(
@@ -700,6 +724,13 @@ async def aspect_suggest(req: AspectSuggestRequest):
         content = resp.choices[0].message.content or "{}"
         data = json.loads(content)
         q = (data.get("question") or "").strip()
+        # Basic cleanup and enforcement
+        if len(q) > 80:
+            q = q[:77].rstrip() + "?"
+        if q and q not in st.last_questions:
+            st.last_questions.append(q)
+            if len(st.last_questions) > 12:
+                st.last_questions = st.last_questions[-12:]
         if not q:
             # Fallback minimal
             q = "Walk me through the last time."
