@@ -204,9 +204,9 @@ export default function SummaryPage() {
                     {(() => {
                       const hintsData = hintsPerMinute.map((v, i) => ({ index: i + 1, hints: v }))
                       return (
-                        <ChartContainer
-                          config={{ hints: { label: 'Hints', color: '#10b981' } }}
-                          className="w-full h-40 md:h-48"
+                    <ChartContainer
+                      config={{ hints: { label: 'Hints', color: '#10b981' } }}
+                      className="w-full h-40 md:h-48"
                         >
                           <ResponsiveContainer width="100%" height="100%">
                             <LineChart data={hintsData} margin={{ left: 6, right: 6, top: 10, bottom: 0 }}>

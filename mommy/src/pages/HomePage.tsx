@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom"
 import ReactMarkdown from "react-markdown"
 
 import { Button } from "@/components/ui/button"
+import { ChevronDown } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 
@@ -21,6 +22,32 @@ export default function HomePage() {
   const [isSubmitting, setIsSubmitting] = React.useState(false)
   const [isEnriching, setIsEnriching] = React.useState(false)
   const [editingContext, setEditingContext] = React.useState(false)
+  const [showTypeMenu, setShowTypeMenu] = React.useState(false)
+  const typeMenuRef = React.useRef<HTMLDivElement | null>(null)
+  const [conversationType, setConversationType] = React.useState<"mom" | "pitch" | "sales" | "sprint">("mom")
+
+  React.useEffect(() => {
+    const onDocPointerDown = (e: MouseEvent) => {
+      if (!typeMenuRef.current) return
+      if (!typeMenuRef.current.contains(e.target as Node)) {
+        setShowTypeMenu(false)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowTypeMenu(false)
+    }
+    document.addEventListener('pointerdown', onDocPointerDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onDocPointerDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [])
+
+  // Close the type menu when entering the form view
+  React.useEffect(() => {
+    if (showForm) setShowTypeMenu(false)
+  }, [showForm])
 
   // basic inline errors
   const [errors, setErrors] = React.useState<{ clientName?: string; clientLinkedInUrl?: string; enrich?: string }>({})
@@ -85,24 +112,69 @@ export default function HomePage() {
     navigate("/chat", { state: { clientName, context: combined } })
   }
 
+  // (Markdown rendered instantly; no fade)
+
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-rose-50 via-white to-rose-50 dark:from-gray-950 dark:via-black dark:to-gray-950">
       <div className="mx-auto w-full max-w-6xl px-4 py-12">
         {/* Hero */}
         <div className="mb-12">
-          <div className="inline-flex items-center gap-2 rounded-full border bg-card/60 px-3 py-1 text-xs text-muted-foreground">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
-            Tiger Mom — Silent Listener Coach
+          <div className="relative inline-block" ref={typeMenuRef}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => { if (!showForm) setShowTypeMenu((v) => !v) }}
+              className="rounded-full border bg-card/60 text-xs h-7 px-3 py-0.5 text-muted-foreground"
+              aria-haspopup={showForm ? undefined : "menu"}
+              aria-expanded={showForm ? undefined : showTypeMenu}
+            >
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              {conversationType === 'mom' && 'Mom Test Assistant'}
+              {conversationType === 'pitch' && 'Pitch'}
+              {conversationType === 'sales' && 'Sales call'}
+              {conversationType === 'sprint' && 'Sprint meeting'}
+              {!showForm && <ChevronDown className="ml-2 h-3.5 w-3.5 opacity-60" />}
+            </Button>
+            {!showForm && showTypeMenu && (
+              <div
+                role="menu"
+                tabIndex={-1}
+                className="absolute left-0 mt-1 min-w-56 rounded-md border bg-popover p-1 text-sm text-popover-foreground shadow-md z-20"
+              >
+                {[
+                  { key: 'mom', label: 'Mom Test Assistant' },
+                  { key: 'pitch', label: 'Pitch' },
+                  { key: 'sales', label: 'Sales call' },
+                  { key: 'sprint', label: 'Sprint meeting' },
+                ].map((opt) => (
+                  <button
+                    key={opt.key}
+                    role="menuitemradio"
+                    aria-checked={conversationType === (opt.key as any)}
+                    onClick={() => { setConversationType(opt.key as any); setShowTypeMenu(false) }}
+                    className={`w-full text-left flex items-center rounded-sm px-2 py-1.5 hover:bg-accent hover:text-accent-foreground ${conversationType === (opt.key as any) ? 'bg-accent/60' : ''}`}
+                  >
+                    <span className="inline-block h-1.5 w-1.5 rounded-full mr-2" style={{ backgroundColor: conversationType === (opt.key as any) ? 'var(--color-primary, hsl(var(--primary)))' : 'hsl(var(--muted-foreground))' }} />
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-          <h1 className="mt-4 text-4xl md:text-6xl font-semibold tracking-tight">
-            Ask about facts, not opinions.
-          </h1>
-          <p className="mt-3 max-w-2xl text-base md:text-lg text-muted-foreground">
-            Tiger Mom quietly listens to your customer interviews and nudges you to dig deeper when it matters — workarounds, spend, timelines, and stakeholders.
-          </p>
+          {!showForm && (
+            <>
+              <h1 className="mt-4 text-4xl md:text-6xl font-semibold tracking-tight">
+                Ask about facts, not opinions.
+              </h1>
+              <p className="mt-3 max-w-2xl text-base md:text-lg text-muted-foreground">
+                Tiger Mom quietly listens to your customer interviews and nudges you to dig deeper when it matters — workarounds, spend, timelines, and stakeholders.
+              </p>
+            </>
+          )}
           {!showForm && (
             <div className="mt-8 flex items-end gap-3">
-              <Button size="lg" onClick={() => setShowForm(true)} className="text-base px-6">
+              <Button size="lg" onClick={() => { setShowForm(true); navigate({ pathname: '/', search: '?prepare=1' }, { replace: true }) }} className="text-base px-6">
                 Start Preparing
               </Button>
               <a
@@ -192,7 +264,7 @@ export default function HomePage() {
                   </div>
 
                   <div className="pt-2 flex gap-2">
-                    <Button type="button" variant="outline" onClick={() => setShowForm(false)} disabled={isSubmitting || isEnriching}>
+                    <Button type="button" variant="outline" onClick={() => { setShowForm(false); navigate({ pathname: '/', search: '' }, { replace: true }) }} disabled={isSubmitting || isEnriching}>
                       Back
                     </Button>
                     <Button type="submit" disabled={isSubmitting}>

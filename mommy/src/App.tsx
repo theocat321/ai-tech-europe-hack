@@ -1,14 +1,16 @@
-import { BrowserRouter as Router, Routes, Route, NavLink, Link } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, NavLink, Link, useLocation } from 'react-router-dom'
 import HomePage from '@/pages/HomePage'
 import ChatPage from '@/pages/ChatPage'
 import AboutMePage from '@/pages/AboutMePage'
 import SummaryPage from '@/pages/SummaryPage'
 
-function App() {
+function AppInner() {
+  const { pathname, search } = useLocation()
+  const params = new URLSearchParams(search)
+  const hideHeader = pathname.startsWith('/chat') || (pathname === '/' && params.get('prepare') === '1')
   return (
-    <Router>
-      <div className="w-full min-h-screen">
-        {/* Modern Notion-like top bar */}
+    <div className="w-full min-h-screen">
+      {!hideHeader && (
         <header className="sticky top-0 z-40 w-full border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <div className="mx-auto max-w-6xl px-4 h-14 flex items-center justify-between">
             {/* Brand */}
@@ -42,13 +44,21 @@ function App() {
             </div>
           </div>
         </header>
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/chat" element={<ChatPage />} />
-          <Route path="/about-me" element={<AboutMePage />} />
-          <Route path="/summary" element={<SummaryPage />} />
-        </Routes>
-      </div>
+      )}
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/chat" element={<ChatPage />} />
+        <Route path="/about-me" element={<AboutMePage />} />
+        <Route path="/summary" element={<SummaryPage />} />
+      </Routes>
+    </div>
+  )
+}
+
+function App() {
+  return (
+    <Router>
+      <AppInner />
     </Router>
   )
 }
