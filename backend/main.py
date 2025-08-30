@@ -572,10 +572,12 @@ async def stt_chunk(session_id: str, request: Request, client: httpx.AsyncClient
 
 async def maybe_make_hint(st: SessionState) -> Optional[Dict[str, str]]:
     now = time.time()
-    if now - st.last_hint_ts < 45:
+    if now - st.last_hint_ts < 10:
+        logger.info("hint: throttled (wait %.1fs)", 10 - (now - st.last_hint_ts))
         return None
     full_text = "\n".join(st.transcript)
-    if len(full_text) <= st.last_analyzed_len + 40:
+    if len(full_text) <= st.last_analyzed_len:
+        logger.info("hint: no new text yet (len=%d)", len(full_text))
         return None
 
     sys_prompt = BASE_BEHAVIOR + "\n\nReturn ONLY JSON with either {\"no_hint\": true} OR {\"hint\": \"...\", \"followup_question\": \"...\"}. No extra text."
@@ -595,12 +597,15 @@ async def maybe_make_hint(st: SessionState) -> Optional[Dict[str, str]]:
         data = json.loads(content)
         st.last_analyzed_len = len(full_text)
         if data.get("no_hint"):
+            logger.info("hint: model returned no_hint")
             return None
         hint = (data.get("hint") or "").strip()
         follow = (data.get("followup_question") or "").strip()
         if not hint or not follow:
+            logger.info("hint: missing fields hint or followup (hint_len=%d follow_len=%d)", len(hint), len(follow))
             return None
         st.last_hint_ts = now
+        logger.info("hint: generated")
         return {"hint": hint, "followup_question": follow}
     except Exception as e:
         logger.exception("hint generation failed: %s", str(e))

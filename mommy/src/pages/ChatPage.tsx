@@ -45,6 +45,8 @@ export default function ChatPage() {
   const audioCtxRef = React.useRef<AudioContext | null>(null)
   const chimeEnabledRef = React.useRef<boolean>(true)
   const [sessionId, setSessionId] = React.useState<string | null>(null)
+  const [segmentCount, setSegmentCount] = React.useState<number>(0)
+  const [lastTranscript, setLastTranscript] = React.useState<string>("")
 
   const playChime = React.useCallback(async () => {
     if (!chimeEnabledRef.current) return
@@ -128,9 +130,17 @@ export default function ChatPage() {
             const blob = new Blob(chunks, { type: mime })
             if (blob.size && sData.session_id) {
               try {
-                await fetch(`${API_URL}/api/stt_chunk?session_id=${sData.session_id}`, {
+                const resp = await fetch(`${API_URL}/api/stt_chunk?session_id=${sData.session_id}`, {
                   method: 'POST', headers: { 'Content-Type': mime }, body: blob,
                 })
+                if (resp.ok) {
+                  const data = await resp.json()
+                  const text: string = (data?.text || '').trim()
+                  setSegmentCount((c) => c + 1)
+                  if (text) setLastTranscript(text)
+                } else {
+                  setSegmentCount((c) => c + 1)
+                }
               } catch (e) { console.warn('stt_chunk failed', e) }
             }
             // Start next segment
@@ -267,7 +277,22 @@ export default function ChatPage() {
                   const hint = 'They mentioned a workaround; ask the last time it broke.'
                   const follow = 'Walk me through the most recent failure and how you handled it.'
                   appendMessage(`(hint) ${hint} — Try: ${follow}`, false)
-                  if (!speakHints) playChime()
+                  if (!speakHints) {
+                    playChime()
+                  } else {
+                    // Speak via backend TTS
+                    fetch(`${API_URL}/api/tts`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ text: `${hint}. ${follow}` }),
+                    }).then(async (r) => {
+                      if (!r.ok) return
+                      const blob = await r.blob()
+                      const url = URL.createObjectURL(blob)
+                      const audio = new Audio(url)
+                      audio.play().finally(() => URL.revokeObjectURL(url))
+                    }).catch(() => {})
+                  }
                 }}
                 title={demoMode ? 'Trigger a sample hint' : 'Enable Demo Mode to use'}
               >
@@ -405,6 +430,27 @@ export default function ChatPage() {
           </div>
 
           {/* Only chime or OpenAI TTS playback handled programmatically */}
+          {/* Floating Recorder Indicator (bottom-right) */}
+          <div className="fixed bottom-4 right-4 pointer-events-auto">
+            <Card className="w-72 shadow-lg bg-card/90 backdrop-blur-sm border">
+              <CardContent className="p-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <span
+                    className={`inline-block h-2 w-2 rounded-full ${isListening ? 'bg-red-500 animate-pulse' : 'bg-gray-400'}`}
+                    title={isListening ? 'Recording segments' : 'Paused'}
+                  />
+                  <span className="text-xs text-muted-foreground">Recording</span>
+                  <span className="ml-auto text-[11px] text-muted-foreground">Seg: {segmentCount}</span>
+                </div>
+                <div className="text-xs text-foreground/90">
+                  <span className="font-medium">Last:</span>{' '}
+                  <span className="truncate inline-block align-middle max-w-[220px]" title={lastTranscript || 'No transcript yet'}>
+                    {lastTranscript || '—'}
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </div>
     </div>
