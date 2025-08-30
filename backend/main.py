@@ -28,11 +28,14 @@ from models.models import (
     AspectSuggestResponse,
     EnrichLinkedInRequest,
     EnrichLinkedInResponse,
+    AspectDetectRequest,
+    AspectDetectResponse,
 )
 from prompts import (
     BASE_BEHAVIOR,
     ENRICHMENT_SYSTEM_PROMPT,
     ENRICHMENT_USER_PROMPT_TEMPLATE,
+    ASPECT_DETECTOR_SYSTEM_PROMPT,
 )
 
 load_dotenv()
@@ -714,3 +717,49 @@ async def tts_openai(request: Request, client: httpx.AsyncClient = Depends(get_h
     except Exception as e:
         logger.exception("/api/tts failed: %s", str(e))
         raise HTTPException(status_code=502, detail=str(e))
+
+
+# --- LLM-based Aspect Detection ---------------------------------------------------
+
+@app.post("/api/aspect_detect", response_model=AspectDetectResponse)
+async def aspect_detect(req: AspectDetectRequest):
+    st = get_session(req.session_id)
+    text = (req.text or "").strip()
+    if not text:
+        return AspectDetectResponse(aspects=[])
+
+    # Provide a small context window to reduce false positives
+    context_tail = "\n".join(st.transcript[-6:])
+    user = (
+        "Recent transcript (latest at end). Classify ONLY the interviewer lines.\n\n"
+        f"Context (earlier):\n{context_tail}\n\n"
+        f"Latest snippet to classify:\n{text}\n"
+    )
+    try:
+        resp = await openai_client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": ASPECT_DETECTOR_SYSTEM_PROMPT},
+                {"role": "user", "content": user},
+            ],
+            temperature=0,
+            response_format={"type": "json_object"},
+            max_tokens=120,
+        )
+        content = resp.choices[0].message.content or "{}"
+        data = json.loads(content)
+        aspects = data.get("aspects")
+        if not isinstance(aspects, list):
+            aspects = []
+        allowed = {"compliment", "hypothetical", "leading", "pitching", "fluff", "yesno", "vague"}
+        clean = [a for a in aspects if isinstance(a, str) and a in allowed]
+        seen: set = set()
+        ordered: List[str] = []
+        for a in clean:
+            if a not in seen:
+                seen.add(a)
+                ordered.append(a)
+        return AspectDetectResponse(aspects=ordered)
+    except Exception as e:
+        logger.exception("/api/aspect_detect failed: %s", str(e))
+        return AspectDetectResponse(aspects=[])

@@ -149,6 +149,17 @@ export default function ChatPage() {
     return found
   }, [])
 
+  // Label metadata for LLM-detected aspect keys
+  const aspectMeta = React.useMemo(() => ({
+    compliment: { title: '[compliment]', message: 'Compliments hide facts.' },
+    hypothetical: { title: '[hypothetical]', message: 'Drop hypotheticals.' },
+    leading: { title: '[leading]', message: 'Leading questions bias answers. Ask neutrally.' },
+    pitching: { title: '[pitching]', message: 'Avoid pitching.' },
+    fluff: { title: '[fluff]', message: 'Opinions ≠ evidence.' },
+    yesno: { title: '[yes/no]', message: 'Avoid yes/no.' },
+    vague: { title: '[vague]', message: 'Get specific.' },
+  }), [])
+
   const unlockAudio = React.useCallback(async () => {
     try {
       let ctx = audioCtxRef.current
@@ -260,7 +271,29 @@ export default function ChatPage() {
                   setSegmentCount((c) => c + 1)
                   if (text) {
                     setLastTranscript(text)
-                    const found = detectAspects(text)
+                    // Prefer LLM detection; fallback to local regex
+                    let found: Array<{ key: string; title: string; message: string; followup: string }> = []
+                    try {
+                      const det = await fetch(`${API_URL}/api/aspect_detect`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ session_id: sData.session_id, text }),
+                      })
+                      if (det.ok) {
+                        const j = await det.json()
+                        const keys: string[] = Array.isArray(j?.aspects) ? j.aspects : []
+                        found = keys.map((key) => ({
+                          key,
+                          title: (aspectMeta as any)[key]?.title || `[${key}]`,
+                          message: (aspectMeta as any)[key]?.message || 'Check phrasing.',
+                          followup: '',
+                        }))
+                      } else {
+                        found = detectAspects(text)
+                      }
+                    } catch {
+                      found = detectAspects(text)
+                    }
                     setAspects(found)
                     // Append new aspect warnings into the feed (dedup by key)
                     const seen = seenAspectKeysRef.current
