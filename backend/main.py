@@ -23,6 +23,7 @@ from models.models import (
     StartSessionRequest,
     StartSessionResponse,
     HintsResponse,
+    EndSessionResponse,
     EnrichLinkedInRequest,
     EnrichLinkedInResponse,
 )
@@ -581,13 +582,7 @@ async def maybe_make_hint(st: SessionState) -> Optional[Dict[str, str]]:
         logger.info("hint: no new text yet (len=%d)", len(full_text))
         return None
 
-    sys_prompt = (
-        "You are a background MOM Test hint analyzer. "
-        "Read the transcript and decide if the INTERVIEWER has just missed an opportunity.\n"
-        "Opportunities include: workaround mentioned, real spend/time, recent timeline/deadline, decision-maker/stakeholders, prior attempts, switching friction, constraints/budget.\n"
-        "Return ONLY strict JSON, no prose. One of: {\"no_hint\": true} OR {\"hint\": \"<=120 chars\", \"followup_question\": \"ONE neutral past-behavior question\"}.\n"
-        "Be concise, neutral, non-leading. If unsure, return {\"no_hint\": true}."
-    )
+    sys_prompt = HINT_ANALYZER_SYSTEM_PROMPT
     ctx_note = "\n\nContext:\n" + (st.user_context or "")
     user_prompt = (
         f"Transcript so far (latest at end):\n\n{full_text}{ctx_note}\n\n"
@@ -631,6 +626,18 @@ async def get_hints(session_id: str):
     if h:
         return HintsResponse(hints=[h])
     return HintsResponse(hints=[])
+
+
+@app.post("/api/session/end", response_model=EndSessionResponse)
+async def end_session(session_id: str):
+    existed = session_id in SESSIONS
+    if existed:
+        try:
+            del SESSIONS[session_id]
+        except KeyError:
+            pass
+    logger.info("/api/session/end: sid=%s removed=%s", session_id, existed)
+    return EndSessionResponse(ok=True, removed=existed)
 
 
 @app.post("/api/tts")

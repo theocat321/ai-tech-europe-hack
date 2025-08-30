@@ -63,3 +63,8 @@ class HintItem(BaseModel):
 
 class HintsResponse(BaseModel):
     hints: List[HintItem]
+
+
+class EndSessionResponse(BaseModel):
+    ok: bool
+    removed: bool

@@ -47,6 +47,90 @@ export default function ChatPage() {
   const [sessionId, setSessionId] = React.useState<string | null>(null)
   const [segmentCount, setSegmentCount] = React.useState<number>(0)
   const [lastTranscript, setLastTranscript] = React.useState<string>("")
+  const [aspects, setAspects] = React.useState<Array<{ key: string; title: string; message: string; followup: string }>>([])
+  const seenAspectKeysRef = React.useRef<Set<string>>(new Set())
+
+  // Detect Mom Test anti-patterns from the latest transcript chunk
+  const detectAspects = React.useCallback((text: string) => {
+    const t = (text || '').toLowerCase()
+    const found: Array<{ key: string; title: string; message: string; followup: string }> = []
+
+    const push = (key: string, title: string, message: string, followup: string) => {
+      if (!found.some((a) => a.key === key)) found.push({ key, title, message, followup })
+    }
+
+    // Compliments
+    if (/(that'?s|thats)?\s*(great|awesome|amazing|cool|nice|love\s+it|sounds\s+good|fantastic)/.test(t)) {
+      push(
+        'compliment',
+        '[compliment]',
+        'Compliments paper over facts. Pivot to past behavior.',
+        'When was the last time that happened and what did you do next?'
+      )
+    }
+
+    // Hypotheticals / future talk
+    if (/(would|will|might|plan to|planning to|in the future|do you think)/.test(t)) {
+      push(
+        'hypothetical',
+        '[hypothetical]',
+        'Hypotheticals are unreliable. Anchor to real, recent events.',
+        'Tell me about the last time this came up. What did you actually do?'
+      )
+    }
+
+    // Leading question / confirmation bias
+    if (/(wouldn'?t\s+you|don'?t\s+you\s+think|isn'?t\s+that\s+right|right\?|yeah\?)/.test(t)) {
+      push(
+        'leading',
+        '[leading]',
+        'Leading questions bias answers. Ask neutrally.',
+        'How do you handle this today? What did you try most recently?'
+      )
+    }
+
+    // Pitching / solutioning
+    if (/(our\s+(product|tool|solution)|we\s+(built|can|will|offer)|let\s+me\s+show|demo)/.test(t)) {
+      push(
+        'pitching',
+        '[pitching]',
+        'Pitching too early kills learning. Stay in their world.',
+        'What have you tried so far and what broke first?'
+      )
+    }
+
+    // Opinions / fluff
+    if (/(i\s+think|maybe|probably|i\s+guess|seems|interesting)/.test(t)) {
+      push(
+        'fluff',
+        '[fluff]',
+        'Opinions are soft. Ask for specifics and numbers.',
+        'Over the past month, how often did this happen and how long did it take?'
+      )
+    }
+
+    // Yes/No trap
+    if (/^(do|did|is|are|was|were|have)\s+you\b/.test(t)) {
+      push(
+        'yesno',
+        '[yes/no]',
+        'Yes/No invites short answers. Open it up.',
+        'Walk me through the last time; what happened first?'
+      )
+    }
+
+    // Vague universals
+    if (/(always|never|everyone|no\s+one)/.test(t)) {
+      push(
+        'vague',
+        '[vague]',
+        'Vague universals hide edge cases. Get a concrete example.',
+        'Can you recall a specific recent instance? What did you do?'
+      )
+    }
+
+    return found
+  }, [])
 
   const playChime = React.useCallback(async () => {
     if (!chimeEnabledRef.current) return
@@ -137,7 +221,23 @@ export default function ChatPage() {
                   const data = await resp.json()
                   const text: string = (data?.text || '').trim()
                   setSegmentCount((c) => c + 1)
-                  if (text) setLastTranscript(text)
+                  if (text) {
+                    setLastTranscript(text)
+                    const found = detectAspects(text)
+                    setAspects(found)
+                    // Append new aspect warnings into the feed (dedup by key)
+                    const seen = seenAspectKeysRef.current
+                    for (const a of found) {
+                      if (!seen.has(a.key)) {
+                        appendMessage(`${a.title} ${a.message} — Try: ${a.followup}`, false)
+                        seen.add(a.key)
+                        if (seen.size > 100) {
+                          // prevent unbounded growth
+                          seenAspectKeysRef.current = new Set(Array.from(seen).slice(-50))
+                        }
+                      }
+                    }
+                  }
                 } else {
                   setSegmentCount((c) => c + 1)
                 }
@@ -169,6 +269,17 @@ export default function ChatPage() {
       }
     }
   }, [context, speakHints])
+
+  // End background session on unmount/navigation
+  React.useEffect(() => {
+    return () => {
+      const sid = sessionId
+      if (sid) {
+        // Fire and forget
+        fetch(`${API_URL}/api/session/end?session_id=${sid}`, { method: 'POST' }).catch(() => {})
+      }
+    }
+  }, [sessionId])
 
   // Poll for hints
   React.useEffect(() => {
@@ -456,6 +567,7 @@ export default function ChatPage() {
                 </div>
               </CardContent>
             </Card>
+            {/* Aspect warnings moved into main feed */}
           </div>
         </div>
       </div>

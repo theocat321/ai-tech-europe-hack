@@ -131,7 +131,7 @@ export default function AboutMePage() {
         <div className="h-1 w-full bg-rose-500/80" />
         <div className="px-6 py-8 max-w-4xl mx-auto">
           <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight text-gray-900 dark:text-white">
-            Your Mom-Test Profile
+            My Context
           </h1>
           <p className="mt-2 text-sm md:text-base text-gray-600 dark:text-gray-300 max-w-2xl">
             Keep it concise and truthful. Strong prompts come from clear goals and constraints.
