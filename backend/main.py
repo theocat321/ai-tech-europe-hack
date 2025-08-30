@@ -1,11 +1,20 @@
 import os
-import json
 from typing import Optional
-from fastapi import FastAPI, Body, HTTPException
+
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse, PlainTextResponse
 import httpx
 from dotenv import load_dotenv
+
+from models.models import (
+    PersonalContextRequest,
+    PersonalContextResponse,
+    RealtimeRequest,
+    RealtimeResponse,
+    WhisperRequest,
+)
+from prompts import BASE_BEHAVIOR
 
 load_dotenv()
 
@@ -13,6 +22,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 ELEVEN_MODEL = os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2_5")
 ELEVEN_VOICE = os.getenv("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")
+PERSONAL_CONTEXT_FILE = "personal_context.txt"
 
 if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY missing")
@@ -33,29 +43,31 @@ if origins:
 
 # --- Helper: build the realtime session instructions --------------------------------
 
-BASE_BEHAVIOR = """
-You are "Mom Test Assistant".
-Primary mode: SILENT LISTENER. You do not interrupt normal flow.
-Only speak aloud if the user asks you directly. Otherwise, help via a function tool.
 
-Goal: help the interviewer run a great MOM Test–style conversation.
-- Never pitch or describe "our solution".
-- Prefer questions about PAST BEHAVIOR, not hypotheticals or opinions.
-- Avoid leading questions; keep questions neutral and concise.
-- Prioritize: frequency, recency, money/time spent, existing alternatives, prior attempts, decision-maker, constraints/budget, deadlines, integrations/data sources.
+def read_personal_context() -> str:
+    try:
+        with open(PERSONAL_CONTEXT_FILE, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return ""
 
-When you detect the interviewer SKIPS or GLIDES OVER a strong signal (e.g., they mention a problem, workaround, cost, budget, switching friction, timeline, stakeholders), CALL the tool `whisper_hint` with:
-- hint: <=120 chars, crisp cue (what we missed)
-- followup_question: ONE specific, neutral, past-behavior question the interviewer can ask next.
 
-Cadence: at most one hint every 45 seconds.
+def make_instructions(client_context: str, personal_context: str) -> str:
+    client_context = (client_context or "").strip()
+    personal_context = (personal_context or "").strip()
 
-If the user explicitly asks you for help, answer with 1–2 sentences, or give 1–2 high-quality questions.
-"""
+    personal_context_section = (
+        f"\n\nMy personal context:\n{personal_context}"
+        if personal_context
+        else ""
+    )
+    client_context_section = (
+        f"\n\nContext for this call (client-provided):\n{client_context}"
+        if client_context
+        else ""
+    )
+    return BASE_BEHAVIOR + personal_context_section + client_context_section
 
-def make_instructions(user_context: str) -> str:
-    context = f"\nContext for this call (developer-provided):\n{user_context.strip()}\n"
-    return BASE_BEHAVIOR + context
 
 # --- Routes ------------------------------------------------------------------------
 
@@ -63,21 +75,34 @@ def make_instructions(user_context: str) -> str:
 def root():
     return PlainTextResponse("Mom Test Assistant Backend is running.")
 
-@app.post("/api/realtime")
-async def create_realtime_client_secret(payload: dict = Body(...)):
+
+@app.get("/api/personal_context")
+def get_personal_context():
+    return PlainTextResponse(read_personal_context())
+
+
+@app.post("/api/personal_context", response_model=PersonalContextResponse)
+async def update_personal_context(payload: PersonalContextRequest):
+    with open(PERSONAL_CONTEXT_FILE, "w", encoding="utf-8") as f:
+        f.write(payload.content)
+    return PersonalContextResponse(status="ok")
+
+
+@app.post("/api/realtime", response_model=RealtimeResponse)
+async def create_realtime_client_secret(payload: RealtimeRequest):
     """
     Mint a short-lived client_secret for WebRTC Realtime. The frontend will use it
     as the Bearer token in the 'POST /v1/realtime?model=gpt-realtime' SDP exchange.
     """
-    user_context: str = payload.get("context") or ""
-    voice: Optional[str] = payload.get("voice")  # e.g., "marin" or "cedar" (OpenAI realtime voices)
+    user_context: str = payload.context or ""
+    voice: Optional[str] = payload.voice  # e.g., "marin" or "cedar" (OpenAI realtime voices)
 
     session_cfg = {
         "type": "realtime",
         "model": "gpt-realtime",
         # Set a voice so the model can speak. Marin/Cedar are new high-quality voices.
         **({"voice": voice} if voice else {}),
-        "instructions": make_instructions(user_context),
+        "instructions": make_instructions(user_context, read_personal_context()),
         # Tool definition: the model will call this when it wants to whisper a hint.
         "tools": [
             {
@@ -118,18 +143,18 @@ async def create_realtime_client_secret(payload: dict = Body(...)):
         client_secret = data.get("client_secret", {}).get("value")
         if not client_secret:
             raise HTTPException(status_code=500, detail="No client_secret returned")
-        return {"client_secret": client_secret}
+        return RealtimeResponse(client_secret=client_secret)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/whisper", response_class=StreamingResponse)
-async def elevenlabs_whisper(payload: dict = Body(...)):
+@app.post("/api/whisper")
+async def elevenlabs_whisper(payload: WhisperRequest):
     """
     Generate a short whispered TTS hint. Keep it LOW LATENCY.
     You can switch ELEVENLABS_MODEL_ID to 'eleven_v3' to fully leverage [whispers] tags.
     """
-    text: str = (payload.get("text") or "").strip()
+    text: str = (payload.text or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="Text is required")
 
@@ -143,7 +168,7 @@ async def elevenlabs_whisper(payload: dict = Body(...)):
         "model_id": ELEVEN_MODEL,
         "text": whisper_text,
         "output_format": "mp3_22050_32",
-        # Keep responses snappy; you can tweak via VoiceSettings, but default is okay for short hints.
+        # Keep responses snappy; defaults are fine for short hints.
     }
 
     async def gen():
@@ -160,6 +185,7 @@ async def elevenlabs_whisper(payload: dict = Body(...)):
                     json=q,
                 ) as resp:
                     if resp.status_code >= 400:
+                        # Surface ElevenLabs error body to caller
                         chunk = await resp.aread()
                         yield chunk
                         return
