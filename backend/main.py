@@ -2,6 +2,8 @@ import os
 import re
 import json
 import logging
+import uuid
+import time
 from typing import Optional, Dict, Any, Tuple, List
 from pathlib import Path
 
@@ -18,6 +20,9 @@ from models.models import (
     RealtimeRequest,
     RealtimeResponse,
     WhisperRequest,
+    StartSessionRequest,
+    StartSessionResponse,
+    HintsResponse,
     EnrichLinkedInRequest,
     EnrichLinkedInResponse,
 )
@@ -110,6 +115,28 @@ def _sanitize_eleven_voice(v: str) -> str:
 
 
 ELEVEN_VOICE = _sanitize_eleven_voice(ELEVEN_VOICE_RAW)
+
+
+# --- In-memory background session store ------------------------------------------
+
+class SessionState:
+    def __init__(self, speak_hints: bool, user_context: str, personal_context: str):
+        self.created_at = time.time()
+        self.speak_hints = speak_hints
+        self.user_context = user_context
+        self.personal_context = personal_context
+        self.transcript: List[str] = []
+        self.last_hint_ts: float = 0.0
+        self.last_analyzed_len: int = 0
+
+
+SESSIONS: Dict[str, SessionState] = {}
+
+def get_session(session_id: str) -> SessionState:
+    st = SESSIONS.get(session_id)
+    if not st:
+        raise HTTPException(status_code=404, detail="Unknown session_id")
+    return st
 
 
 # --- Helper Functions --------------------------------------------------------------
@@ -489,3 +516,131 @@ async def elevenlabs_whisper(
     except Exception as e:
         logger.exception("/api/whisper unexpected error: %s", str(e))
         return JSONResponse({"error": str(e)}, status_code=502)
+# --- Background Session Endpoints -------------------------------------------------
+
+@app.post("/api/session/start", response_model=StartSessionResponse)
+async def start_session(payload: StartSessionRequest):
+    sid = uuid.uuid4().hex
+    st = SessionState(
+        speak_hints=bool(payload.speak_hints),
+        user_context=(payload.context or ""),
+        personal_context=read_personal_context(),
+    )
+    SESSIONS[sid] = st
+    logger.info("/api/session/start: sid=%s speak=%s ctx_len=%d", sid, st.speak_hints, len(st.user_context))
+    return StartSessionResponse(session_id=sid)
+
+
+@app.post("/api/stt_chunk")
+async def stt_chunk(session_id: str, request: Request, client: httpx.AsyncClient = Depends(get_http_client)):
+    # Accept raw audio bytes (e.g., webm/opus) and transcribe with Whisper
+    st = get_session(session_id)
+    content_type = request.headers.get("Content-Type", "")
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty audio body")
+    logger.info("/api/stt_chunk: sid=%s bytes=%d ct=%s", session_id, len(body), content_type)
+
+    # Send multipart request directly to OpenAI to control filename and content-type
+    try:
+        files = {
+            "file": ("audio.webm", body, "audio/webm"),
+        }
+        data = {"model": "whisper-1"}
+        headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
+        r = await client.post(
+            "https://api.openai.com/v1/audio/transcriptions",
+            headers=headers,
+            data=data,
+            files=files,
+        )
+        if r.status_code >= 400:
+            logger.error("/api/stt_chunk openai  %d: %s", r.status_code, r.text[:512])
+            raise HTTPException(status_code=502, detail=r.text)
+        data = r.json()
+        text = (data.get("text") or "").strip()
+        if text:
+            st.transcript.append(text)
+            logger.info("/api/stt_chunk: sid=%s appended text_len=%d total_len=%d", session_id, len(text), sum(len(x) for x in st.transcript))
+        return JSONResponse({"ok": True, "text": text})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("/api/stt_chunk transcription failed: %s", str(e))
+        raise HTTPException(status_code=502, detail=f"STT failed: {e}")
+
+
+async def maybe_make_hint(st: SessionState) -> Optional[Dict[str, str]]:
+    now = time.time()
+    if now - st.last_hint_ts < 45:
+        return None
+    full_text = "\n".join(st.transcript)
+    if len(full_text) <= st.last_analyzed_len + 40:
+        return None
+
+    sys_prompt = BASE_BEHAVIOR + "\n\nReturn ONLY JSON with either {\"no_hint\": true} OR {\"hint\": \"...\", \"followup_question\": \"...\"}. No extra text."
+    user_prompt = f"Transcript so far (latest at end):\n\n{full_text}\n\nAnalyze the latest segment(s) and decide if interviewer missed a MOM Test opportunity."
+
+    try:
+        resp = await openai_client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.3,
+            response_format={"type": "json_object"},
+        )
+        content = resp.choices[0].message.content or "{}"
+        data = json.loads(content)
+        st.last_analyzed_len = len(full_text)
+        if data.get("no_hint"):
+            return None
+        hint = (data.get("hint") or "").strip()
+        follow = (data.get("followup_question") or "").strip()
+        if not hint or not follow:
+            return None
+        st.last_hint_ts = now
+        return {"hint": hint, "followup_question": follow}
+    except Exception as e:
+        logger.exception("hint generation failed: %s", str(e))
+        return None
+
+
+@app.get("/api/hints", response_model=HintsResponse)
+async def get_hints(session_id: str):
+    st = get_session(session_id)
+    h = await maybe_make_hint(st)
+    if h:
+        return HintsResponse(hints=[h])
+    return HintsResponse(hints=[])
+
+
+@app.post("/api/tts")
+async def tts_openai(request: Request, client: httpx.AsyncClient = Depends(get_http_client)):
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=500, detail="OPENAI_API_KEY missing")
+    try:
+        payload = await request.json()
+        text = (payload.get("text") or "").strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="Text is required")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    url = "https://api.openai.com/v1/audio/speech"
+    q = {"model": "gpt-4o-mini-tts", "voice": "verse", "input": text}
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json",
+        "Accept": "audio/mpeg",
+    }
+    try:
+        r = await client.post(url, headers=headers, json=q)
+        if r.status_code >= 400:
+            logger.error("/api/tts openai error %d: %s", r.status_code, r.text[:512])
+            return JSONResponse({"error": r.text}, status_code=r.status_code)
+        return Response(content=r.content, media_type="audio/mpeg")
+    except Exception as e:
+        logger.exception("/api/tts failed: %s", str(e))
+        raise HTTPException(status_code=502, detail=str(e))

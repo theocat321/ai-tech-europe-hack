@@ -16,10 +16,7 @@ interface Message {
   initials?: string
 }
 
-type OaiEvent = {
-  type: string
-  [k: string]: any
-}
+// Realtime event type removed; background mode only
 
 export default function ChatPage() {
   const navigate = useNavigate()
@@ -27,7 +24,7 @@ export default function ChatPage() {
   const context = (location.state as { context?: string, speakHints?: boolean })?.context || ''
   const initialSpeak = Boolean((location.state as { speakHints?: boolean })?.speakHints)
   const [speakHints, setSpeakHints] = React.useState<boolean>(initialSpeak)
-  const [clientSecret, setClientSecret] = React.useState<string | null>(null)
+  // Realtime client secret removed in background mode
   const [error, setError] = React.useState<string | null>(null)
   const [isListening, setIsListening] = React.useState(true)
   const [isLoading, setIsLoading] = React.useState(false)
@@ -43,12 +40,11 @@ export default function ChatPage() {
   ])
 
   // WebRTC refs
-  const pcRef = React.useRef<RTCPeerConnection | null>(null)
-  const eventsDcRef = React.useRef<RTCDataChannel | null>(null)
   const localStreamRef = React.useRef<MediaStream | null>(null)
   // Text-only hints: no whisper audio playback
   const audioCtxRef = React.useRef<AudioContext | null>(null)
   const chimeEnabledRef = React.useRef<boolean>(true)
+  const [sessionId, setSessionId] = React.useState<string | null>(null)
 
   const playChime = React.useCallback(async () => {
     if (!chimeEnabledRef.current) return
@@ -90,131 +86,116 @@ export default function ChatPage() {
 
   // No-op; whisper audio removed
 
-  // Start server session to get client secret
-  React.useEffect(() => {
-    const startSession = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/realtime`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ context, ...(speakHints ? { voice: 'verse' } : {}) }),
-        })
-        if (!res.ok) throw new Error('Failed to start session')
-        const data = await res.json()
-        setClientSecret(data.client_secret)
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Failed to start session')
-      }
-    }
-    startSession()
-  }, [context, speakHints])
+  // Realtime disabled in background mode
 
-  // Establish WebRTC to OpenAI Realtime once we have a client secret
+  // Background mode: start session, then capture mic and send chunks to backend STT
   React.useEffect(() => {
-    if (!clientSecret) return
-
-    let pc: RTCPeerConnection
-    let eventsDc: RTCDataChannel
+    let recorder: MediaRecorder | null = null
     let stopped = false
 
-    const setup = async () => {
+    const boot = async () => {
       try {
         setIsLoading(true)
-        pc = new RTCPeerConnection()
-        pcRef.current = pc
-
-        // If speakHints is enabled, play remote audio from Realtime (OpenAI voice)
-        pc.ontrack = (e) => {
-          if (!speakHints) return
-          const audioEl = document.getElementById('realtime-audio') as HTMLAudioElement | null
-          if (audioEl) {
-            audioEl.srcObject = e.streams[0]
-            audioEl.play().catch(() => {/* autoplay may require user gesture */})
-          }
-        }
-
-        // Events data channel from server
-        pc.ondatachannel = (evt) => {
-          if (evt.channel.label === 'oai-events') {
-            const ch = evt.channel
-            ch.onmessage = (m) => handleOaiEvent(m.data)
-          }
-        }
-
-        // Local events channel to send events (optional)
-        eventsDc = pc.createDataChannel('oai-events')
-        eventsDcRef.current = eventsDc
+        // Start background session
+        const sRes = await fetch(`${API_URL}/api/session/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ context, speak_hints: speakHints }),
+        })
+        if (!sRes.ok) throw new Error('Failed to start session')
+        const sData = await sRes.json()
+        setSessionId(sData.session_id)
 
         // Mic capture
         const ms = await navigator.mediaDevices.getUserMedia({ audio: true })
         localStreamRef.current = ms
-        ms.getAudioTracks().forEach((t) => pc.addTrack(t, ms))
+        const mime = (window as any).MediaRecorder?.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : 'audio/webm'
 
-        const offer = await pc.createOffer()
-        await pc.setLocalDescription(offer)
-
-        const baseUrl = 'https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17'
-        const r = await fetch(baseUrl, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${clientSecret}`,
-            'Content-Type': 'application/sdp',
-          },
-          body: offer.sdp,
-        })
-        if (!r.ok) throw new Error('Realtime handshake failed')
-        const ansSdp = await r.text()
-        await pc.setRemoteDescription({ type: 'answer', sdp: ansSdp })
-      } catch (e) {
-        if (!stopped) setError(e instanceof Error ? e.message : 'Connection failed')
-      } finally {
-        if (!stopped) setIsLoading(false)
-      }
-    }
-
-    const handleOaiEvent = (raw: any) => {
-      try {
-        const evt: OaiEvent = typeof raw === 'string' ? JSON.parse(raw) : raw
-        // Intentionally ignore normal assistant text to remain silent-listener.
-        // We only surface tool-based hints to the UI.
-        // Tool invocation
-        if (evt.type === 'response.tool_call') {
-          const name = evt.name
-          const args = evt.arguments || {}
-          if (name === 'whisper_hint' && typeof args.hint === 'string') {
-            const hint: string = args.hint
-            const follow: string = args.followup_question || ''
-            // Show a subtle text message and optional chime
-            appendMessage(`(hint) ${hint}${follow ? ` — Try: ${follow}` : ''}`, false)
-            if (!speakHints) playChime()
+        const startOne = () => {
+          if (stopped) return
+          try {
+            recorder = new MediaRecorder(ms, { mimeType: mime })
+          } catch (e) {
+            recorder = new MediaRecorder(ms)
           }
+          const chunks: Blob[] = []
+          recorder.ondataavailable = (ev) => {
+            if (ev.data && ev.data.size) chunks.push(ev.data)
+          }
+          recorder.onstop = async () => {
+            const blob = new Blob(chunks, { type: mime })
+            if (blob.size && sData.session_id) {
+              try {
+                await fetch(`${API_URL}/api/stt_chunk?session_id=${sData.session_id}`, {
+                  method: 'POST', headers: { 'Content-Type': mime }, body: blob,
+                })
+              } catch (e) { console.warn('stt_chunk failed', e) }
+            }
+            // Start next segment
+            if (!stopped) startOne()
+          }
+          recorder.start()
+          setTimeout(() => { try { recorder?.stop() } catch {} }, 5000)
         }
+        startOne()
       } catch (e) {
-        console.warn('Failed to parse oai event', e)
+        setError(e instanceof Error ? e.message : 'Failed to start')
+      } finally {
+        setIsLoading(false)
       }
     }
 
-    setup()
+    boot()
 
     return () => {
       stopped = true
-      try {
-        eventsDcRef.current?.close()
-      } catch {}
-      eventsDcRef.current = null
-      try {
-        pcRef.current?.getSenders().forEach((s) => {
-          try { s.track?.stop() } catch {}
-        })
-        pcRef.current?.close()
-      } catch {}
-      pcRef.current = null
+      try { recorder?.stop() } catch {}
+      recorder = null
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((t) => t.stop())
         localStreamRef.current = null
       }
     }
-  }, [clientSecret, appendMessage, playChime, speakHints])
+  }, [context, speakHints])
+
+  // Poll for hints
+  React.useEffect(() => {
+    if (!sessionId) return
+    let timer: any
+    const tick = async () => {
+      try {
+        const r = await fetch(`${API_URL}/api/hints?session_id=${sessionId}`)
+        if (!r.ok) return
+        const data = await r.json()
+        const hints = (data?.hints || []) as Array<{hint: string, followup_question: string}>
+        for (const h of hints) {
+          appendMessage(`(hint) ${h.hint} — Try: ${h.followup_question}`, false)
+          if (!speakHints) playChime()
+          else {
+            // speak via OpenAI TTS
+            try {
+              const tts = await fetch(`${API_URL}/api/tts`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: `${h.hint}. ${h.followup_question}` })
+              })
+              if (tts.ok) {
+                const blob = await tts.blob()
+                const url = URL.createObjectURL(blob)
+                const audio = new Audio(url)
+                audio.play().finally(() => URL.revokeObjectURL(url))
+              }
+            } catch {}
+          }
+        }
+      } finally {
+        timer = setTimeout(tick, 4000)
+      }
+    }
+    tick()
+    return () => clearTimeout(timer)
+  }, [sessionId, appendMessage, playChime, speakHints])
 
   // Toggle mic enable/disable when isListening changes
   React.useEffect(() => {
@@ -423,8 +404,7 @@ export default function ChatPage() {
             </div>
           </div>
 
-          {/* Remote audio for OpenAI Realtime when speakHints is enabled */}
-          <audio id="realtime-audio" hidden playsInline />
+          {/* Only chime or OpenAI TTS playback handled programmatically */}
         </div>
       </div>
     </div>
