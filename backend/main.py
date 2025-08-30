@@ -1,9 +1,10 @@
 import os
 import re
 import json
+import logging
 from typing import Optional, Dict, Any, Tuple, List
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse, PlainTextResponse
 import httpx
@@ -27,10 +28,19 @@ from prompts import (
 
 load_dotenv()
 
+# --- Logging ----------------------------------------------------------------------
+
+logger = logging.getLogger("momtest-backend")
+if not logger.handlers:
+    logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(asctime)s %(name)s: %(message)s')
+logger.setLevel(logging.INFO)
+
 # --- Environment Variables & Configuration -----------------------------------------
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+# Prefer a distinct realtime model, fallback to a sane default preview model
+OPENAI_REALTIME_MODEL = os.getenv("OPENAI_REALTIME_MODEL", "gpt-4o-realtime-preview-2024-12-17")
 ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 ELEVEN_MODEL = os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2_5")
 ELEVEN_VOICE = os.getenv("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")
@@ -275,13 +285,23 @@ def update_personal_context(payload: PersonalContextRequest):
 @app.post("/api/realtime", response_model=RealtimeResponse)
 async def create_realtime_client_secret(
     payload: RealtimeRequest,
-    client: httpx.AsyncClient = Depends(get_http_client)
+    client: httpx.AsyncClient = Depends(get_http_client),
+    request: Request = None,
 ):
-    user_context: str = payload.context or ""
+    if not OPENAI_API_KEY:
+        logger.error("/api/realtime called but OPENAI_API_KEY missing")
+        raise HTTPException(status_code=400, detail="Server is missing OPENAI_API_KEY")
+
+    user_context: str = (payload.context or "").strip()
     voice: Optional[str] = payload.voice
+
+    logger.info("/api/realtime payload: ip=%s, voice=%s, context_len=%d",
+                request.client.host if request and request.client else "?",
+                voice,
+                len(user_context))
+
     session_cfg = {
-        "type": "realtime",
-        "model": "gpt-realtime",
+        "model": OPENAI_REALTIME_MODEL,
         **({"voice": voice} if voice else {}),
         "instructions": make_instructions(user_context, read_personal_context()),
         "tools": [
@@ -306,24 +326,50 @@ async def create_realtime_client_secret(
             }
         ],
     }
+
+    logger.info("/api/realtime session_cfg: model=%s, voice=%s, instructions_len=%d, tools=%d",
+                session_cfg.get("model"),
+                session_cfg.get("voice"),
+                len(session_cfg.get("instructions", "")),
+                len(session_cfg.get("tools", [])))
+
+    url = "https://api.openai.com/v1/realtime/sessions"
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    # The sessions endpoint expects the session fields at the top level (no wrapper)
+    body = session_cfg
+
     try:
-        r = await client.post(
-            "https://api.openai.com/v1/realtime/client_secrets",
-            headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={"session": session_cfg},
-        )
-        r.raise_for_status()
+        r = await client.post(url, headers=headers, json=body)
+        logger.info("/api/realtime OpenAI response: status=%d", r.status_code)
+        raw_text = r.text
+        if r.status_code >= 400:
+            # Log up to 2KB of body for diagnostics
+            snippet = raw_text[:2048]
+            logger.error("OpenAI realtime error %d: %s", r.status_code, snippet)
+            return JSONResponse({"error": snippet}, status_code=r.status_code)
         data = r.json()
-        client_secret = data.get("client_secret", {}).get("value")
+        logger.info("/api/realtime OpenAI ok: keys=%s", list(data.keys()))
+        client_secret = (
+            (data.get("client_secret") or {}).get("value")
+            if isinstance(data, dict)
+            else None
+        )
         if not client_secret:
-            raise HTTPException(status_code=500, detail="No client_secret returned")
+            logger.error("/api/realtime missing client_secret in response: %s", raw_text[:512])
+            raise HTTPException(status_code=502, detail="OpenAI did not return client_secret")
+        logger.info("/api/realtime success: issued client_secret (len=%d)", len(client_secret))
         return RealtimeResponse(client_secret=client_secret)
-    except httpx.HTTPStatusError as e:
-        return JSONResponse({"error": e.response.text}, status_code=e.response.status_code)
+    except httpx.RequestError as e:
+        logger.exception("/api/realtime httpx request error: %s", str(e))
+        raise HTTPException(status_code=502, detail=f"Network error contacting OpenAI: {e}")
+    except json.JSONDecodeError as e:
+        logger.exception("/api/realtime JSON decode error: %s", str(e))
+        raise HTTPException(status_code=502, detail="Invalid JSON from OpenAI realtime API")
     except Exception as e:
+        logger.exception("/api/realtime unexpected error: %s", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
